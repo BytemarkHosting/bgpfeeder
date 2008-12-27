@@ -1,0 +1,74 @@
+bgpfeeder by Matthew Bloch <matthew@bytemark.co.uk>
+---------------------------------------------------
+
+bgpfeeder is a program to feed a BGPv4 speaker with an infrequently changing
+list of static internal routes.  We intend to use it at Bytemark to
+rearrange routing information from our "network organiser" database, to
+avoid staff having to log in to core routers to effect common routing
+changes.
+
+It is configured with a set of static parameters on the command line which
+cannot be changed once started.  These are the AS number (usually 65534),
+BGP identifier (assumed to be the local IP) and the hold time (defaults to
+60).  The administrator also specifies filesnames of the peers file, and the
+routes file.  These are intended to be ASCII text lists, watched by the
+program for changes made by the administrator.  
+
+The peers file contains a list of IP addresses of BGPv4 peers.  When a new
+peer is seen for the first time, the program continually tries to connect to
+it and send its current complete route list.  When a peer is removed from
+the list the BGP connection is terminated.
+
+The routes file contains a list of static routes, any of these forms is
+acceptable and equivalent in this example, i.e. routing the IP block
+10.0.0.1 via the next hop of 192.168.0.1
+   10.0.0.0 255.255.255.0 192.168.0.1
+   10.0.0.0/24 192.168.0.1
+   10.0.0.0/24 via 192.168.0.1
+Only NEXT_HOP (type code 3) path attributes are supported by bgpfeeder. The
+file is checked for differences whenever it is changed and UPDATE messages
+sent to current peers accordingly.  When routes are removed, the message
+puts the route into the 'withdrawn' section.  When routes are replaced, the
+same UPDATE message contains both the withdrawn route and the new new one so
+the peer can update its database without a "flap" (i.e. removing the route
+and adding it again).
+
+Limitations
+-----------
+
+There should be no limits on the size of the routes and peers files other
+than what the system imposes.  The routes file is re-read and parsed in its
+entirety when it is changed, so updates may be slower to get into the BGP
+network the larger the file is.  However this is by design; the program is
+not intended to server very frequenty changing routes (i.e. more than about
+once per minute).
+
+bgpfeeder is not a "proper" BGPv4 daemon in that it doesn't listen on port
+179 for incoming connections, and discards any UPDATE messages from its
+peers.  Its state machine bears no relation to the complicated one described
+in RFC 1771.  None of this should affect it doing its job.
+
+Received UPDATE messages generate a warning as the system is written in a
+scripting language which is relatively slow to handle large amounts of data. 
+If a peer is bombarding it with an entire internet routing table when it
+starts up, it will take a lot of CPU time to discard such information
+relative to a normal BGP program.
+
+Deployment example
+------------------
+
+If you were running the program on the IP 80.68.80.1, you might use a script
+like this:
+
+cd /home/bgpfeeder
+bgpfeeder 65534 80.68.80.1 60 routes peers
+
+It does not daemonise itself - an example init script is provided as
+bgpfeeder.init.d or you can make your own arrangements.
+
+It is important that the routes and peers files are updated atomically, i.e.
+if they are built from other data, they must be moved into place.  This
+means use rsync if you are copying them on remotely, and temporary files if
+not.  If you forget to do this, you may find your BGP sessions and routes
+flapping very frequently as the program re-reads half-written files.
+

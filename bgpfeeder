@@ -1,0 +1,237 @@
+#!/usr/bin/ruby
+require 'ipaddr'
+require 'socket'
+
+#http://www.faqs.org/rfcs/rfc1771.html
+
+class IPAddr
+  # BGP update messages contain IP prefixes encoded as <length,prefix>
+  # tuples where length is 0-4 and prefix is the number of relevant
+  # bytes of the IP address, e.g. 
+  #    10.0.0.0/24 => [1,10]
+  #    192.168.0.1/32 => [4,192,168,0,1]
+  #    0.0.0.0/0 => [0]
+  # 
+  def bgp_encoded_prefix
+    raise ArgumentError.new("Can't encode IPv6 for BGPv4") if ipv6?
+    #4.times do |n|
+    #  return [4-n, to_i].pack("cN")[0..4-n] if
+    #    @mask_addr & (0xff << n) != 0
+    #end
+    #"\0"
+    # hm, what would be the point?
+    if @mask_addr & 0xff != 0
+      [4, to_i].pack("cN")
+    elsif @mask_addr & 0xff00 != 0
+      [3, to_i].pack("cN")[0..3]
+    elsif @mask_addr & 0xff0000 != 0
+      [2, to_i].pack("cN")[0..2]
+    elsif @mask_addr & 0xff000000 != 0
+      [1, to_i].pack("cN")[0..1]
+    else
+      "\0" # slash zero
+    end
+  end
+end
+
+module BGP
+  class NotificationException < Exception; end
+
+  class Peer
+    def initialize(speaker, remote_host)
+      @speaker = speaker
+      @hold_time = speaker.hold_time # possibly overridden by remote OPEN
+      @thread = Thread.new { reconnect_and_run_loop }
+    end
+
+    def close
+      @closed = true
+      @s.close
+    end
+
+    protected
+
+    def reconnect_and_run_loop
+      loop
+        @closed = false
+
+        begin
+          @s = TCPSocket.new(remote_host, 179)
+        rescue Errno::ECONNREFUSED, Errno::ETIMEDOUT => e
+          Log.warn("#{remote_host} failed BGPv4 connection due to #{e}, will try again in 60s")
+          sleep 60
+          retry
+        end
+
+        begin
+          do_open
+          send_updates(@speaker.full_update)
+          responder_thread = Thread.new { do_respond_loop }
+          do_maintain_connection
+        rescue NotificationException => ex
+        ensure
+          @closed = true
+          begin
+            responder_thread.join
+          rescue NotificationException => ex2
+          end
+        end
+      end
+    end
+
+    TYPE_OPEN = 1
+    TYPE_UPDATE = 2
+    TYPE_NOTIFICATION = 3
+    TYPE_KEEPALIVE = 4
+    ERROR_EXPLANATIONS = [
+      nil,
+      "Message header error",
+      "OPEN message error",
+      "UPDATE message error", 
+      "Hold timer expired",
+      "State machine error",
+      "Cease"
+    ]
+
+    # first communication once socket is open, send OPEN, expect to 
+    # receive the same from peer, note its hold time.
+    #
+    def do_open
+      send_open
+      type, message = read_next_message
+      send_notification(1,1,"Expected OPEN, got #{type} instead") if type != TYPE_OPEN
+      send_notification(2,1,"Unsupported BGP version, peer is speaking v#{message[0]}") if message[0] != 4
+      peer_hold_time = message[3..4].unpack("n")
+      @hold_time = peer_hold_time if peer_hold_time > @speaker.hold_time
+      @alive_last_sent = Time.now
+    end
+
+    # send updates and keepalives, take appropriate action on errors
+    def do_maintain_connection
+      while !@closed
+        updates = @speaker.wait_for_updates(next_keepalive_at)
+        if updates
+          # blah blah send updates
+        else
+          send_keepalive
+        end
+      end
+    end
+
+    def do_respond_loop
+      update_warned = false
+
+      while !@closed
+        type, message = read_next_message
+
+        if type == TYPE_OPEN
+          send_notification(5,0,"Received second OPEN message")
+        end
+
+        if type == TYPE_UPDATE && !update_warned
+          Log.warn("ignoring #{message.length} byte UPDATE from peer (further UPDATES will not be warned about, fix peer configuration!)")
+          update_warned = true
+        end
+
+        if type == TYPE_NOTIFICATION
+          code, subcode, data = message[0], message[1], message[2..7]
+          Log.error("received notification #{explain_error(code, subcode)}, disconnecting")
+          @closed = true
+        end
+      end
+    end
+
+    def explain_error(code, subcode)
+      expl = ERROR_EXPLANATIONS[code]
+      expl = "unknown" unless expl
+      "#{code}.#{subcode} (#{expl})"
+    end
+
+    def send_open
+      send_message(TYPE_OPEN, [
+        4, # version, BGP 4
+        @speaker.autonomous_system,
+        @speaker.hold_time,
+        @speaker.bgp_identifier.to_i,
+      ].pack("cnnN")
+    end
+
+    def send_keepalive
+      send_message(TYPE_KEEPALIVE)
+      @alive_last_sent = Time.now
+    end
+
+    # Notifications are always fatal
+    def send_notification(code, subcode, explanation=nil)
+      send_message(TYPE_NOTIFICATION,
+        [code, subcode].pack("cc") + "\0\0\0\0\0\0"
+      )
+      Log.error(explanation) if explanation
+      Log.error("sent notification #{explain_error(code,subcode)}")
+      raise NotificationException.new(explanation)
+    end
+
+    # Read next BGPv4 message, checking the marker and updating
+    # @alive_last_seen so we know not to panic.
+    #
+    def read_next_message
+      header = @s.read(19)
+      error_marker if header[0..15] != MARKER
+      length, type = header[16..18].unpack("nc")
+      if type == TYPE_OPEN || type == TYPE_UPDATE || type == TYPE_KEEPALIVE
+        @alive_last_seen = Time.now
+      end
+      [type, @s.read(length)]
+    end
+
+    # Send BGPv4 message, adding appropriate header
+    def send_message(type, message)
+      @s.send(MARKER + [message.length, type].pack("nc"))
+      @s.send(message)
+    end
+
+    def next_keepalive_at
+      ideal_time = @hold_time / 3
+      ideal_time = 1 if ideal_time == 0
+      @alive_last_sent + ideal_time
+    end
+
+    MARKER = "\377"*16
+
+  end
+
+  class Speaker
+    def initialize(autonomous_system, bgp_identifier, hold_time=15, config_file)
+      @autonomous_system = autonomous_system
+      @bgp_identifier = IPAddr.new(bgp_identifier)
+      @hold_time = hold_time
+      @peers = {}
+    end
+
+    def add_peer(ip)
+    end
+
+    def initialize(peer_ip)
+    end
+
+
+  update_message = [
+    0, # withdrawn routes length: 2 bytes
+    withdrawn_routes,
+      # length: 1 octect (number of significant bits 0-32)
+      # prefix: 1 byte if 8 bits or less, 2 bytes if 16 bits etc.
+    0, # total path attributes length: 2 bytes
+    path_attributes,
+      # attribute type: 2 bytes:
+        # 1 flags: 255 = optional (otherwise well-known)
+        #          128 = transitive (otherwise non-transitive)
+        #          64 = partial (otherwise complete)
+        #          32 = extended length (2 bytes, otherwise 1 byte)
+        #          others unused
+        # 2 type code:
+        #    ORIGIN
+    # network layer reachability information
+      # length, prefix pairs as per withdrawn_routes
+  ]
+
+end

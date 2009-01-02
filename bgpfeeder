@@ -290,7 +290,7 @@ module BGP
         # (obviously) but we are obliged to supply ORIGIN (set to internal
         # gateway protocol), AS_PATH (which is empty, because we're never
         # talking to a peer outside of our AS, I hope), and LOCAL_PREF which
-        # is set to 100.
+        # is set by the database.
         #
         if update.next_hop
           path_attributes_raw = 
@@ -298,7 +298,7 @@ module BGP
             ### 1-length AS path, not used [ATYPE_TRANSITIVE, ATTR_AS_PATH, 4, 1, 1, 65534].pack("cccccn")+
             [ATYPE_TRANSITIVE, ATTR_AS_PATH, 0].pack("ccc")+
             [ATYPE_TRANSITIVE, ATTR_NEXT_HOP, 4, update.next_hop.to_i].pack("cccN")+
-            [ATYPE_TRANSITIVE, ATTR_LOCAL_PREF, 4, 100].pack("cccN")
+            [ATYPE_TRANSITIVE, ATTR_LOCAL_PREF, 4, @database.local_pref].pack("cccN")
  
           update_data += [path_attributes_raw.length].pack("n") + path_attributes_raw
 
@@ -416,11 +416,13 @@ module BGP
     attr_reader :autonomous_system
     attr_reader :hold_time
     attr_reader :bgp_identifier
+    attr_reader :local_pref
 
-    def initialize(autonomous_system, bgp_identifier, hold_time, file)
+    def initialize(autonomous_system, bgp_identifier, hold_time, local_pref, file)
       @autonomous_system = autonomous_system
       @bgp_identifier = IPAddr.new(bgp_identifier)
       @hold_time = hold_time
+      @local_pref = local_pref.to_i
       @file = FileWatcher.new(file)
       @routes = []
       @route_updates = []
@@ -574,8 +576,8 @@ end
 
 if __FILE__ == $0
   include BGP
-  if ARGV.length < 5
-    STDERR.print "Syntax: #{$0} <AS number> <BGP identifier (IP)> <hold time> <routes file> <peers file>\n"
+  if ARGV.length < 6
+    STDERR.print "Syntax: #{$0} <AS number> <BGP identifier (IP)> <hold time> <local pref> <routes file> <peers file>\n"
     exit 1
   end
   if ENV['BGPFEEDER_LOG_LEVEL']
@@ -583,7 +585,7 @@ if __FILE__ == $0
   else
     Log.level = Logger::INFO
   end
-  db = Database.new(ARGV[0].to_i, ARGV[1], ARGV[2].to_i, ARGV[3])
-  peers = PeerManager.new(ARGV[4], db)
+  db = Database.new(ARGV[0].to_i, ARGV[1], ARGV[2].to_i, ARGV[3], ARGV[4])
+  peers = PeerManager.new(ARGV[5], db)
   peers.run
 end

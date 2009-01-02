@@ -286,28 +286,29 @@ module BGP
 
         # 2: path attributes
         #
-        # see 4.3, Path Attributes for encoding details, but we only
-        # support next hop which is mandatory, transitive, complete  
-        # and non-extended.  The attribute length is always 4, the length
-        # of an IPv4 address, and the value is the normal 4-byte IPv4
-        # encoding.
+        # The only attribute that provides different information is NEXT_HOP
+        # (obviously) but we are obliged to supply ORIGIN (set to internal
+        # gateway protocol), AS_PATH (which is empty, because we're never
+        # talking to a peer outside of our AS, I hope), and LOCAL_PREF which
+        # is set to 100.
         #
-
-        path_attributes_raw = 
-          [ATYPE_TRANSITIVE, ATTR_ORIGIN, 1, 0].pack("cccc")+
-#          [ATYPE_TRANSITIVE, ATTR_AS_PATH, 4, 1, 1, 65534].pack("cccccn")+
-          [ATYPE_TRANSITIVE, ATTR_AS_PATH, 2, 1, 0].pack("ccccc")+
-          [ATYPE_TRANSITIVE, ATTR_NEXT_HOP, 4, update.next_hop.to_i].pack("cccN")+
-          [ATYPE_TRANSITIVE, ATTR_LOCAL_PREF, 4, 100].pack("cccN")
+        if update.next_hop
+          path_attributes_raw = 
+            [ATYPE_TRANSITIVE, ATTR_ORIGIN, 1, 0].pack("cccc")+
+            ### 1-length AS path, not used [ATYPE_TRANSITIVE, ATTR_AS_PATH, 4, 1, 1, 65534].pack("cccccn")+
+            [ATYPE_TRANSITIVE, ATTR_AS_PATH, 0].pack("ccc")+
+            [ATYPE_TRANSITIVE, ATTR_NEXT_HOP, 4, update.next_hop.to_i].pack("cccN")+
+            [ATYPE_TRANSITIVE, ATTR_LOCAL_PREF, 4, 100].pack("cccN")
  
-        update_data += [path_attributes_raw.length].pack("n") + path_attributes_raw
+          update_data += [path_attributes_raw.length].pack("n") + path_attributes_raw
 
-        # l_debug "path attributes data: #{path_attributes_raw.inspect}"
+          # l_debug "path attributes data: #{path_attributes_raw.inspect}"
 
-        # 3: prefixes that the above path attributes apply to, always 1
-        # per update
-        #
-        update_data += update.prefix.bgp_encoded_prefix
+          # 3: prefixes that the above path attributes apply to, always 1
+          # per update unless we're just withdrawing a previous route.
+          #
+          update_data += update.prefix.bgp_encoded_prefix
+        end
 
         # l_debug "prefix data: #{update.prefix.bgp_encoded_prefix.inspect}"
 

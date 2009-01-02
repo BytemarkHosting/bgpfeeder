@@ -1,6 +1,8 @@
 bgpfeeder by Matthew Bloch <matthew@bytemark.co.uk>
 ---------------------------------------------------
 
+See http://src.bytemark.co.uk/trac/bgpfeeder for later versions
+
 bgpfeeder is a program to feed a BGPv4 speaker with an infrequently changing
 list of static internal routes.  We intend to use it at Bytemark to
 rearrange routing information from our "network organiser" database, to
@@ -8,30 +10,45 @@ avoid staff having to log in to core routers to effect common routing
 changes.
 
 It is configured with a set of static parameters on the command line which
-cannot be changed once started.  These are the AS number (usually 65534),
-BGP identifier (assumed to be the local IP) and the hold time (defaults to
-60).  The administrator also specifies filesnames of the peers file, and the
-routes file.  These are intended to be ASCII text lists, watched by the
-program for changes made by the administrator.  
+cannot be changed once started.  These are your routers' AS number, BGP
+identifier (assumed to be the local IP) and the hold time in seconds (would
+recommend 60s).  The administrator also specifies filenames of two database
+files: the peers file, and the routes file.  These  are the two lists which
+can change while the program is running.
 
 The peers file contains a list of IP addresses of BGPv4 peers.  When a new
 peer is seen for the first time, the program continually tries to connect to
 it and send its current complete route list.  When a peer is removed from
-the list the BGP connection is terminated.
+the list the BGP connection is terminated.  Peers are IPv4 addresses, and
+can have a port specifier i.e. either "80.68.80.1" or "127.0.0.1:1234".  The
+latter can be useful for testing (though no real BGP speaker will listen on
+a port other than the default 179).
 
-The routes file contains a list of static routes, any of these forms is
-acceptable and equivalent in this example, i.e. routing the IP block
-10.0.0.1 via the next hop of 192.168.0.1
-   10.0.0.0 255.255.255.0 192.168.0.1
-   10.0.0.0/24 192.168.0.1
-   10.0.0.0/24 via 192.168.0.1
-Only NEXT_HOP (type code 3) path attributes are supported by bgpfeeder. The
-file is checked for differences whenever it is changed and UPDATE messages
-sent to current peers accordingly.  When routes are removed, the message
-puts the route into the 'withdrawn' section.  When routes are replaced, the
-same UPDATE message contains both the withdrawn route and the new new one so
-the peer can update its database without a "flap" (i.e. removing the route
-and adding it again).
+The routes file contains a list of static routes with "next hop" specifiers. 
+These can either be in roughly "Linux" or "Cisco" formats; e.g. any of these
+means the same thing:
+
+10.0.0.0/24 192.168.0.1
+10.0.0.0/24 via 192.168.0.1
+10.0.0.0 255.255.255.0 192.168.0.1
+ip route 10.0.0.0 255.255.255.0 192.168.0.1
+
+i.e. routing the IP block 10.0.0.0/24 via the next hop of 192.168.0.1
+
+As well as the obvious NEXT_HOP attribute (3), the BGP UPDATE messages sent
+by bgpfeeder contain an ORIGIN setting indicating that these have been
+learned by an IGP, a zero-length AS path, a a local preference of 100.
+
+The routes file is checked for differences whenever it is changed and UPDATE
+messages sent to current peers accordingly.  When routes are removed, the
+message puts the route into the 'withdrawn' section.  When routes are
+replaced, the same UPDATE message contains both the withdrawn route and the
+new new one so the peer can update its database without a "flap" (i.e.
+removing the route and adding it again).
+
+The peers file is checked for differences whenever it is changed; new peers
+are started within a second.  Old peers are signalled to close straight away
+but may take a few seconds to close down properly.
 
 Limitations
 -----------
@@ -54,6 +71,11 @@ If a peer is bombarding it with an entire internet routing table when it
 starts up, it will take a lot of CPU time to discard such information
 relative to a normal BGP program.
 
+Bugs
+----
+"Expected OPEN, got  instead" log message - peers don't open first time,
+should work again after retry 20s later.
+
 Deployment example
 ------------------
 
@@ -61,14 +83,31 @@ If you were running the program on the IP 80.68.80.1, you might use a script
 like this:
 
 cd /home/bgpfeeder
-bgpfeeder 65534 80.68.80.1 60 routes peers
+./bgpfeeder 65534 80.68.80.1 60 ./routes ./peers
 
-It does not daemonise itself - an example init script is provided as
-bgpfeeder.init.d or you can make your own arrangements.
+The program does not daemonise itself - an example init script is provided
+as bgpfeeder.init.d or you can make your own arrangements.
 
-It is important that the routes and peers files are updated atomically, i.e.
-if they are built from other data, they must be moved into place.  This
-means use rsync if you are copying them on remotely, and temporary files if
-not.  If you forget to do this, you may find your BGP sessions and routes
-flapping very frequently as the program re-reads half-written files.
+You can set the environment variable BGPFEEDER_LOG_LEVEL to one of DEBUG,
+INFO, WARN or ERROR to make the logging more or less verbose.  The default
+is WARN.
 
+It is important that the routes and peers files are updated *atomically*, i.e.
+
+* DO use rsync if you are copying the peers & routes file on remotely
+* DO write to (for instance) peers.tmp and then "mv peers.tmp peers"
+* DON'T edit the peers or routes file directory with vi, or scribble to them
+  with "echo 1.2.3.4 >>peers"
+
+If you don't follow this advice you may find routes or peers flapping
+unpredictably, as bgpfeeder won't care if your file is only half written.
+
+TODO: show IOS/quagga configuration examples for peers to make sure routes
+aren't sent back.
+
+Copyright
+---------
+bgpfeeder is (C) Bytemark Hosting 2009, and may be distributed according to
+the terms of the GNU General Public License version 3 ONLY.
+
+http://src.bytemark.co.uk/trac/bgpfeeder

@@ -1,12 +1,23 @@
 #!/usr/bin/ruby
+# Simple BGP talker implemented pretty much from RFC1771
+#
+# See http://src.bytemark.co.uk/trac/bgpfeeder for later versions and more
+# information.
+#
+# (c) Bytemark Hosting 2009
+#
 require 'ipaddr'
 require 'socket'
 require 'logger'
 require 'timeout'
+require 'rubygems'
+require 'ruby-debug'
 
-# Simple BGP talker implemented pretty much from RFC1771
 
 class IPAddr
+  MASK_REVERSE = {}
+  (0..32).each { |b| MASK_REVERSE[4294967296 - (1<<b)] = 32-b }
+
   # BGP update messages contain IP prefixes encoded as <length,prefix>
   # tuples where length is 0-4 and prefix is the number of relevant
   # bytes of the IP address, e.g. 
@@ -16,23 +27,22 @@ class IPAddr
   # 
   def bgp_encoded_prefix
     raise ArgumentError.new("Can't encode IPv6 for BGPv4") if ipv6?
-    #4.times do |n|
-    #  return [4-n, to_i].pack("cN")[0..4-n] if
-    #    @mask_addr & (0xff << n) != 0
-    #end
-    #"\0"
-    # hm, what would be the point?
-    if @mask_addr & 0xff != 0
-      [4, to_i].pack("cN")
-    elsif @mask_addr & 0xff00 != 0
-      [3, to_i].pack("cN")[0..3]
-    elsif @mask_addr & 0xff0000 != 0
-      [2, to_i].pack("cN")[0..2]
-    elsif @mask_addr & 0xff000000 != 0
-      [1, to_i].pack("cN")[0..1]
+    bits = MASK_REVERSE[@mask_addr]
+    if bits > 24
+      [bits, to_i].pack("cN")
+    elsif bits > 16
+      [bits, to_i].pack("cN")[0..3]
+    elsif bits > 8
+      [bits, to_i].pack("cN")[0..2]
+    elsif bits > 0
+      [bits, to_i].pack("cN")[0..1]
     else
       "\0" # i.e. 0.0.0.0/0
     end
+  end
+
+  def hash
+    to_i | @mask_addr << 32 # good enough for IPv4
   end
 end
 
@@ -47,10 +57,14 @@ module BGP
   # Simple data structure for representing a BGP route update with
   # a single NEXT_HOP attribute.
   #
+  # http://justrudd.org/2007/05/02/ruby-weirdness/ bit me when trying to do
+  # array differences, so need to have hash & eql? implemented here and in
+  # the IPAddr class (see above also).
+  #
   class Update < Struct.new(:prefix, :next_hop, :withdraw)
     def initialize(prefix, next_hop=nil, withdraw=nil)
       prefix   = IPAddr.new(prefix) unless prefix.kind_of?(IPAddr)
-      next_hop = IPAddr.new(next_hop) unless prefix.kind_of?(IPAddr)
+      next_hop = IPAddr.new(next_hop) unless next_hop.kind_of?(IPAddr)
       withdraw = withdraw ? true : false
       super(prefix, next_hop, withdraw)
     end
@@ -63,29 +77,44 @@ module BGP
     def replace_route?
       next_hop && withdraw
     end
+    def eql?(b)
+      prefix == b.prefix && next_hop == b.next_hop && withdraw == b.withdraw
+    end
+    def hash
+      (prefix.hash | next_hop.hash << 32) ^ (withdraw ? 0xffffffff : 0 )
+    end
   end
 
   class Peer
-    def initialize(database, remote_host)
+    attr_reader :remote_host
+    attr_reader :remote_port
+    def peer_spec; "#{remote_host}:#{remote_port}"; end
+
+    def initialize(database, peer_spec)
       @database = database
       @hold_time = database.hold_time # possibly overridden by remote OPEN
-      @remote_host = remote_host
+
+      @remote_host, @remote_port = peer_spec.split(":", 2)
+      @remote_port = @remote_port.to_i
+      @remote_port = 179 if @remote_port == 0
+
+      @closed = false
     end
 
     def close
       @closed = true
-      @s.close
     end
 
     def run
-      loop do
-        @closed = false
+      while !@closed
+        started = Time.now
 
         begin
-          @s = TCPSocket.new(@remote_host, 1179)
+          @s = TCPSocket.new(@remote_host, @remote_port)
         rescue Errno::ECONNREFUSED, Errno::ETIMEDOUT => e
-          Log.warn("#{@remote_host} failed BGPv4 connection due to #{e}, will try again in 60s")
+          l_warn("failed BGPv4 connection due to #{e}, will try again in 60s")
           sleep 60
+          break if @closed
           retry
         end
 
@@ -93,15 +122,26 @@ module BGP
           do_open
           do_maintain_connection
         rescue NotificationException => ex
-        ensure
-          @closed = true
         end
-        Log.warn("#{@remote_host} finished, retrying in 60s")
-        sleep 60
+        @s.close
+
+        if !@closed
+          retry_delay = 20 - (Time.now - started)
+          retry_delay = 0 if retry_delay < 1
+          l_warn("died, retrying "+
+            (retry_delay == 0 ? "immediately" : "in #{retry_delay}s")
+          )
+          sleep retry_delay
+        end
       end
     end
 
     protected
+
+    def l_debug(msg); Log.debug("peer #{@remote_host}: #{msg}"); end
+    def l_error(msg); Log.error("peer #{@remote_host}: #{msg}"); end
+    def l_warn(msg); Log.warn("peer #{@remote_host}: #{msg}"); end
+    def l_info(msg); Log.info("peer #{@remote_host}: #{msg}"); end
 
     TYPE_OPEN = 1
     TYPE_UPDATE = 2
@@ -130,8 +170,8 @@ module BGP
         send_notification(1,1,"Expected OPEN, got #{type} instead") if type != TYPE_OPEN
         send_notification(2,1,"Unsupported BGP version, peer is speaking v#{message[0]}") if message[0] != 4
         peer_hold_time = message[3..4].unpack("n")[0]
-        Log.debug "hold time for connection is #{peer_hold_time}s, sending first KEEPALIVE"
-        @hold_time = peer_hold_time if peer_hold_time > @database.hold_time
+        @hold_time = peer_hold_time if peer_hold_time < @database.hold_time
+        l_debug "hold time for connection is #{@hold_time}s, sending first KEEPALIVE"
         send_keepalive
       end
     end
@@ -166,7 +206,7 @@ module BGP
 
           when TYPE_UPDATE
             if !warned_of_received_updates
-              Log.warn("ignoring #{message.length} byte UPDATE from peer (further UPDATES will not be warned about, fix peer configuration!)")
+              l_warn("ignoring #{message.length} byte UPDATE from peer (further UPDATES will not be warned about, fix peer configuration!)")
               warned_of_received_updates = true
             end
 
@@ -187,12 +227,13 @@ module BGP
         send_notification(4,0,"Hold timer expired") if 
           Time.now - @alive_last_seen > @hold_time
       end
+
+      send_notification(6,0,"User closed connection, peer will finish",false)
     end
     
     def handle_notification(message)
       code, subcode, data = message[0], message[1], message[2..7]
-      Log.error("received notification #{explain_error(code, subcode)}, disconnecting")
-      @closed = true
+      l_error("received notification #{explain_error(code, subcode)}, disconnecting")
     end
 
     def explain_error(code, subcode)
@@ -202,7 +243,7 @@ module BGP
     end
 
     def send_open
-      Log.debug { "sending OPEN for AS#{@database.autonomous_system} with hold time #{@database.hold_time} and BGP ID #{@database.bgp_identifier.to_s}" }
+      l_debug "sending OPEN for AS#{@database.autonomous_system} with hold time #{@database.hold_time} and BGP ID #{@database.bgp_identifier.to_s}"
       send_message(TYPE_OPEN, [
         4, # version, BGP 4
         @database.autonomous_system,
@@ -212,12 +253,25 @@ module BGP
       ].pack("cnnNc"))
     end
 
+    ATTR_ORIGIN = 1
+    ATTR_AS_PATH = 2
+    ATTR_NEXT_HOP = 3
+    ATTR_LOCAL_PREF = 5
+
+    ATYPE_OPTIONAL = 128
+    ATYPE_TRANSITIVE = 64
+    ATYPE_PARTIAL = 32
+    ATYPE_EXTENDED_LENGTH = 16
+
     def send_updates(updates)
       # There is scope to aggregate updates a little bit here, but probably
       # would only clutter the code; as long as caller has ensured that
       # "replaced" routes are sent as one update, we avoid flaps which are
       # the main hazard.
       # 
+
+      l_debug "send_updates: #{updates.inspect}"
+
       updates.each do |update|
         update_data = ""
 
@@ -228,28 +282,34 @@ module BGP
           ""
         update_data += [withdrawn_raw.length].pack("n") + withdrawn_raw
 
+        # l_debug "withdrawn data: #{withdrawn_raw.inspect}"
+
         # 2: path attributes
         #
         # see 4.3, Path Attributes for encoding details, but we only
-        # support next hop which is mandatory, non-transitive, complete  
+        # support next hop which is mandatory, transitive, complete  
         # and non-extended.  The attribute length is always 4, the length
         # of an IPv4 address, and the value is the normal 4-byte IPv4
         # encoding.
         #
-        # previous notes on flags:
-        # 1 flags: 255 = optional (otherwise well-known)
-        #          128 = transitive (otherwise non-transitive)
-        #          64 = partial (otherwise complete)
-        #          32 = extended length (2 bytes, otherwise 1 byte)
-        #          others unused
-        #
-        path_attributes_raw = [3 << 10, 4, update.next_hop.to_i].pack("ncN") 
+
+        path_attributes_raw = 
+          [ATYPE_TRANSITIVE, ATTR_ORIGIN, 1, 0].pack("cccc")+
+#          [ATYPE_TRANSITIVE, ATTR_AS_PATH, 4, 1, 1, 65534].pack("cccccn")+
+          [ATYPE_TRANSITIVE, ATTR_AS_PATH, 2, 1, 0].pack("ccccc")+
+          [ATYPE_TRANSITIVE, ATTR_NEXT_HOP, 4, update.next_hop.to_i].pack("cccN")+
+          [ATYPE_TRANSITIVE, ATTR_LOCAL_PREF, 4, 100].pack("cccN")
+ 
         update_data += [path_attributes_raw.length].pack("n") + path_attributes_raw
+
+        # l_debug "path attributes data: #{path_attributes_raw.inspect}"
 
         # 3: prefixes that the above path attributes apply to, always 1
         # per update
         #
         update_data += update.prefix.bgp_encoded_prefix
+
+        # l_debug "prefix data: #{update.prefix.bgp_encoded_prefix.inspect}"
 
         # send the complete message
         send_message(TYPE_UPDATE, update_data)
@@ -257,15 +317,20 @@ module BGP
     end
 
     def send_keepalive
-      Log.debug { "sending KEEPALIVE" }
+      # l_debug { "sending KEEPALIVE" }
       send_message(TYPE_KEEPALIVE)
       @alive_last_sent = Time.now
     end
 
     # Notifications are always fatal
-    def send_notification(code, subcode, explanation=nil)
-      Log.error(explanation) if explanation
-      Log.error("sending notification #{explain_error(code,subcode)}")
+    def send_notification(code, subcode, explanation=nil, is_error=true)
+      if is_error
+        l_error(explanation) if explanation
+        l_error("sending notification #{explain_error(code,subcode)}")
+      else
+        l_warn(explanation) if explanation
+        l_warn("sending notification #{explain_error(code,subcode)}")
+      end
       send_message(TYPE_NOTIFICATION,
         [code, subcode].pack("cc") + "\0\0\0\0\0\0"
       )
@@ -279,18 +344,19 @@ module BGP
       begin
         timeout(timeout_seconds) do
           header = @s.read(19)
-          Log.debug { "received header: "+header.inspect }
+          return nil unless header
+          # l_debug { "received header: "+header.inspect }
           send_notification(1,1,"Marker not detected (or out of sync)") if header[0..15] != MARKER
           length, type = header[16..18].unpack("nc")
           if type == TYPE_OPEN || type == TYPE_UPDATE || type == TYPE_KEEPALIVE
             @alive_last_seen = Time.now
           end
           data = @s.read(length-19)
-          Log.debug { "received data: "+data.inspect }
+          # l_debug { "received data: "+data.inspect }
           return [type, data]
         end
       rescue Timeout::Error => timeout
-        Log.debug "timeout!"
+        # l_debug "timeout!"
       end
       nil
     end
@@ -299,7 +365,7 @@ module BGP
     # marker plus message header which needs to be included)
     def send_message(type, message="")
       data = MARKER + [19 + message.length, type].pack("nc") + message
-      Log.debug { "sent: "+data.inspect }
+      # l_debug { "sent: "+data.inspect }
       @s.write(data)
     end
 
@@ -378,6 +444,7 @@ module BGP
 
       routes_to_add    = new_routes - @routes
       routes_to_delete = @routes - new_routes
+
       routes_to_change = []
       # try to combine adds & deletes into a single "change" update to avoid
       # causing a flap.  FIXME: maybe a smarter/indexed search would make
@@ -385,24 +452,28 @@ module BGP
       #
       routes_to_delete.each do |route|
         routes_to_add.each do |route2|
-          if route2.prefix == route.prefix
+          if route2.prefix == route.prefix && route2.next_hop != route.next_hop
             routes_to_add.delete(route2)
             routes_to_delete.delete(route)
             route2.withdraw = true
-            route_to_change << route2
+            routes_to_change << route2
           end
         end
       end
 
-      Log.warn "routes file updated at #{@file.last_updated}: "+
+      Log.info "routes file updated at #{@file.last_updated}: "+
         "#{routes_to_add.length} added, "+
         "#{routes_to_delete.length} deleted, "+
         "#{routes_to_change.length} changed"
 
+      routes_to_add.each { |route| Log.warn "adding route #{route}" }
+      routes_to_delete.each { |route| Log.warn "deleting route #{route}" }
+      routes_to_change.each { |route| Log.warn "changing route #{route}" }
+
       # rewrite since we've pulled this out of our current route table
       routes_to_delete.each do |route|
         route.withdraw = true
-        route.prefix = nil
+        route.next_hop = nil
       end
 
        # add this calculated set of route updates to our log
@@ -415,11 +486,13 @@ module BGP
       # finally overwrite the full route table with the newly-parsed one
       @routes = new_routes
 
+      Log.warn "routes file is empty" if @routes.empty?
+
       nil
     end
 
     _IP = '\d+\.\d+\.\d+\.\d+'
-    FORMAT_LINUX = /^(#{_IP}\/\d+) via (#{_IP})/
+    FORMAT_LINUX = /^(#{_IP}\/\d+) (?:via )(#{_IP})/
     FORMAT_CISCO = /^(?:ip route )(#{_IP}) (#{_IP}) (#{_IP})$/
 
     # Parse a list of lines into a list of BGP::Update objects, silently
@@ -457,33 +530,37 @@ module BGP
 
           # Kill off the peers we've finished with
           #
-          peer_list_finished.each do |ip|
-            Log.info "closing peer #{ip}"
-            @peer_threads[ip][:peer].close
+          peer_list_finished.each do |peer_spec|
+            Log.info "closing peer #{peer_spec}"
+            @peer_threads[peer_spec][:peer].close
           end
 
           # Initialise new ones 
           #
-          peer_list_to_start.each do |ip|
-            Log.info "starting new peer #{ip}"
-            peer = Peer.new(@database, ip)
-            @peer_threads[ip] = Thread.new { peer.run }
-            @peer_threads[ip][:peer] = peer
+          peer_list_to_start.each do |peer_spec|
+            Log.info "starting new peer #{peer_spec}"
+            peer = Peer.new(@database, peer_spec)
+            @peer_threads[peer_spec] = Thread.new { peer.run }
+            @peer_threads[peer_spec][:peer] = peer
           end
+
+          Log.warn("peers file is empty, nothing to do for now") if 
+            peer_list_new.length == 0
         end
 
         sleep 1
 
         # Reap any that have finished
         #
-        @peer_threads.each do |ip, thread|
+        @peer_threads.each do |peer_spec, thread|
           next if thread.alive?
           begin
             thread.join
-            Log.info "peer thread #{ip} finished normally"
+            Log.info "peer thread #{peer_spec} finished normally"
+            @peer_threads.delete(peer_spec)
           rescue Exception => ex
-            Log.error "peer thread #{ip} finished with an exception: #{ex}"
-            Log.debug ex.backtrace.join("\n")+"\n"
+            Log.error "peer thread #{peer_spec} finished with an exception: #{ex}"
+            Log.error ex.backtrace.join("\n")+"\n"
           end
         end
       end
@@ -496,6 +573,11 @@ if __FILE__ == $0
   if ARGV.length < 5
     STDERR.print "Syntax: #{$0} <AS number> <BGP identifier (IP)> <hold time> <routes file> <peers file>\n"
     exit 1
+  end
+  if ENV['BGPFEEDER_LOG_LEVEL']
+    Log.level = Logger.const_get(ENV['BGPFEEDER_LOG_LEVEL'])
+  else
+    Log.level = Logger::INFO
   end
   db = Database.new(ARGV[0].to_i, ARGV[1], ARGV[2].to_i, ARGV[3])
   peers = PeerManager.new(ARGV[4], db)

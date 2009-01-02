@@ -132,6 +132,13 @@ namespace :test do
           shutdown -r -n now
         FILE
         
+        write_file("#{dir}/etc/quagga/bgpd.conf", <<-FILE)
+          log stdout debugging
+          
+          router bgp 65534
+           neighbor 10.0.2.2 remote-as 65534
+        FILE
+        
         File.chmod(0755, "#{dir}/startup_test", "#{dir}/startup_first", "#{dir}/startup_shell")
       ensure
         xsys "umount #{dir}"

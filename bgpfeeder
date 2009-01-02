@@ -308,6 +308,9 @@ module BGP
           # per update unless we're just withdrawing a previous route.
           #
           update_data += update.prefix.bgp_encoded_prefix
+        else
+          # zero length path attributes if we're just withdrawig  end
+          update_data += "\0\0" 
         end
 
         # l_debug "prefix data: #{update.prefix.bgp_encoded_prefix.inspect}"

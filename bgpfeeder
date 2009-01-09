@@ -1,18 +1,17 @@
 #!/usr/bin/ruby
-# Simple BGP talker implemented pretty much from RFC1771
+# Simple BGP talker implemented from RFC1771 and RFC1997
 #
 # See http://src.bytemark.co.uk/trac/bgpfeeder for later versions and more
 # information.
 #
 # (c) Bytemark Hosting 2009
+# <matthew@bytemark.co.uk>
 #
 require 'ipaddr'
 require 'socket'
 require 'logger'
 require 'timeout'
-require 'rubygems'
-require 'ruby-debug'
-
+require 'optparse'
 
 class IPAddr
   MASK_REVERSE = {}
@@ -50,7 +49,7 @@ module BGP
   REGEXP_IP_ADDRESS = /^\d+\.\d+\.\d+\.\d+$/
   REGEXP_IP_MASK    = /^\d+\.\d+\.\d+\.\d+\/(?:\d+|\d+\.\d+\.\d+\.\d+)$/
 
-  Log = Logger.new(STDERR) # do we need any more than this?
+  # Must set BGP::Log externally, oops, maybe that's ugly
 
   class NotificationException < Exception; end
 
@@ -61,12 +60,12 @@ module BGP
   # array differences, so need to have hash & eql? implemented here and in
   # the IPAddr class (see above also).
   #
-  class Update < Struct.new(:prefix, :next_hop, :withdraw)
-    def initialize(prefix, next_hop=nil, withdraw=nil)
-      prefix   = IPAddr.new(prefix) unless prefix.kind_of?(IPAddr)
-      next_hop = IPAddr.new(next_hop) unless next_hop.kind_of?(IPAddr)
-      withdraw = withdraw ? true : false
-      super(prefix, next_hop, withdraw)
+  class Update < Struct.new(:prefix, :next_hop, :withdraw, :local_pref, :communities)
+    def initialize(prefix, next_hop=nil)
+      self.communities = []
+      self.local_pref = 100
+      self.prefix = prefix
+      self.next_hop = next_hop
     end
     def withdraw?
       next_hop.nil? || withdraw
@@ -77,8 +76,63 @@ module BGP
     def replace_route?
       next_hop && withdraw
     end
+    def prefix=(p)
+      p = IPAddr.new(p) if p && !p.kind_of?(IPAddr)
+      super(p)
+    end
+    def next_hop=(h)
+      h = IPAddr.new(h) if h && !h.kind_of?(IPAddr)
+      super(h)
+    end
+    def communities=(list)
+      super(Update.parse_communities(list))
+    end
+
+    # Help with parsing textual descriptions
+    #
+    _IP = '\d+\.\d+\.\d+\.\d+'
+    FORMAT_LINUX = /^(#{_IP}\/\d+) (?:via )(#{_IP})/
+    FORMAT_CISCO = /^(?:ip route )(#{_IP}) (#{_IP}) (#{_IP})/
+    FORMAT_COMMUNITIES = /\Wcommunities ([\d\:\,]+)/
+    FORMAT_LOCAL_PREF  = /\Wlocal_pref (\d+)/
+
+    def self.parse_line(line)
+      case line
+        when FORMAT_LINUX then base=Update.new($1,$2)
+        when FORMAT_CISCO then base=Update.new("#{$1}/#{$2}", $3)
+        else
+          return nil
+      end
+      base.communities = $1.split(",") if FORMAT_COMMUNITIES.match(line)
+      base.local_pref = $1.to_i if FORMAT_LOCAL_PREF.match(line)
+      base
+    end
+
+    def self.parse_communities(list)
+      list = list.split(/[ ,]+/) if list.kind_of?(String)
+      raise ArgumentError.new("Must pass String or Array") unless
+        list.kind_of?(Array)
+      
+      list.map do |community|
+        case community
+          when Integer then community
+          when /^0x([0-9a-fA-F]{1,8})$/ then community.hex
+          when /^\d+$/ then community.to_i
+          when /^(\d+):(\d+)$/ then ($1.to_i << 16) | $2.to_i
+          else
+            raise ArgumentError.new("Bad community spec '#{community}'")
+        end
+      end
+    end
+
+    def equal_except_withdraw?(b)
+      a1 = entries
+      b1 = b.entries
+      a1[2] = b1[2] = nil
+      a1 == b1
+    end
     def eql?(b)
-      prefix == b.prefix && next_hop == b.next_hop && withdraw == b.withdraw
+      entries == b.entries
     end
     def hash
       (prefix.hash | next_hop.hash << 32) ^ (withdraw ? 0xffffffff : 0 )
@@ -106,6 +160,15 @@ module BGP
     end
 
     def run
+      begin
+        real_run
+      rescue Exception => ex
+        Log.error("Uncaught exception in peer thread: #{ex}")
+        Log.error(ex.backtrace.join("\n"))
+      end
+    end
+
+    def real_run
       while !@closed
         started = Time.now
 
@@ -119,8 +182,7 @@ module BGP
         end
 
         begin
-          do_open
-          do_maintain_connection
+          do_maintain_connection if do_open
         rescue NotificationException => ex
         end
         @s.close
@@ -166,6 +228,7 @@ module BGP
       type, message = read_next_message
       if type == TYPE_NOTIFICATION
         handle_notification(message)
+        false
       else
         send_notification(1,1,"Expected OPEN, got #{type} instead") if type != TYPE_OPEN
         send_notification(2,1,"Unsupported BGP version, peer is speaking v#{message[0]}") if message[0] != 4
@@ -173,6 +236,7 @@ module BGP
         @hold_time = peer_hold_time if peer_hold_time < @database.hold_time
         l_debug "hold time for connection is #{@hold_time}s, sending first KEEPALIVE"
         send_keepalive
+        true
       end
     end
 
@@ -257,6 +321,7 @@ module BGP
     ATTR_AS_PATH = 2
     ATTR_NEXT_HOP = 3
     ATTR_LOCAL_PREF = 5
+    ATTR_COMMUNITIES = 8
 
     ATYPE_OPTIONAL = 128
     ATYPE_TRANSITIVE = 64
@@ -295,10 +360,16 @@ module BGP
         if update.next_hop
           path_attributes_raw = 
             [ATYPE_TRANSITIVE, ATTR_ORIGIN, 1, 0].pack("cccc")+
-            ### 1-length AS path, not used [ATYPE_TRANSITIVE, ATTR_AS_PATH, 4, 1, 1, 65534].pack("cccccn")+
             [ATYPE_TRANSITIVE, ATTR_AS_PATH, 0].pack("ccc")+
             [ATYPE_TRANSITIVE, ATTR_NEXT_HOP, 4, update.next_hop.to_i].pack("cccN")+
-            [ATYPE_TRANSITIVE, ATTR_LOCAL_PREF, 4, @database.local_pref].pack("cccN")
+            [ATYPE_TRANSITIVE, ATTR_LOCAL_PREF, 4, update.local_pref].pack("cccN")
+
+          if update.communities.length > 0
+            path_attributes_raw += [ATYPE_TRANSITIVE | ATYPE_OPTIONAL, ATTR_COMMUNITIES].pack("cc")
+            communities_raw = update.communities.map { |c| [c].pack("N") }.join
+            path_attributes_raw += [communities_raw.length].pack("c")
+            path_attributes_raw += communities_raw
+          end
  
           update_data += [path_attributes_raw.length].pack("n") + path_attributes_raw
 
@@ -414,15 +485,18 @@ module BGP
 
   class Database
     attr_reader :autonomous_system
-    attr_reader :hold_time
     attr_reader :bgp_identifier
-    attr_reader :local_pref
 
-    def initialize(autonomous_system, bgp_identifier, hold_time, local_pref, file)
+    attr :hold_time, true
+    attr :local_pref, true
+    attr :communities, true
+
+    def initialize(autonomous_system, bgp_identifier, file)
       @autonomous_system = autonomous_system
       @bgp_identifier = IPAddr.new(bgp_identifier)
-      @hold_time = hold_time
-      @local_pref = local_pref.to_i
+      @hold_time = 60
+      @local_pref = 100
+      @communities = []
       @file = FileWatcher.new(file)
       @routes = []
       @route_updates = []
@@ -448,6 +522,13 @@ module BGP
       return unless @file.updated?
       new_routes = full_update_from_lines(@file.read_lines)
 
+      # add system defaults to each route
+      # 
+      new_routes.each do |route|
+        route.local_pref = local_pref if local_pref && !route.local_pref
+        route.communities += communities
+      end
+
       routes_to_add    = new_routes - @routes
       routes_to_delete = @routes - new_routes
 
@@ -458,7 +539,7 @@ module BGP
       #
       routes_to_delete.each do |route|
         routes_to_add.each do |route2|
-          if route2.prefix == route.prefix && route2.next_hop != route.next_hop
+          if route.equal_except_withdraw?(route2)
             routes_to_add.delete(route2)
             routes_to_delete.delete(route)
             route2.withdraw = true
@@ -497,22 +578,8 @@ module BGP
       nil
     end
 
-    _IP = '\d+\.\d+\.\d+\.\d+'
-    FORMAT_LINUX = /^(#{_IP}\/\d+) (?:via )(#{_IP})/
-    FORMAT_CISCO = /^(?:ip route )(#{_IP}) (#{_IP}) (#{_IP})$/
-
-    # Parse a list of lines into a list of BGP::Update objects, silently
-    # ignoring any errors
-    #
     def full_update_from_lines(lines)
-      lines.map do |line|
-        case line
-          when FORMAT_LINUX then Update.new($1,$2)
-          when FORMAT_CISCO then Update.new("#{$1}/#{$2}", $3)
-          else
-            nil
-        end
-      end.compact
+      lines.map { |l| Update.parse_line(l) }.compact
     end
   end
 
@@ -574,18 +641,87 @@ module BGP
   end 
 end
 
+# Command line interface
+#
 if __FILE__ == $0
   include BGP
-  if ARGV.length < 6
-    STDERR.print "Syntax: #{$0} <AS number> <BGP identifier (IP)> <hold time> <local pref> <routes file> <peers file>\n"
+
+  options = {
+    :logger => Logger.new(STDOUT),
+    :local_pref => 100,
+    :hold_time => 60,
+    :bgp_identifier => nil,
+    :autonomous_system => 65534,
+    :routes => 'routes',
+    :peers => 'peers',
+    :communities => []
+  }
+  options[:logger].level = Logger::INFO
+
+  OptionParser.new do |opts|
+    opts.banner = "Usage: #{$0} [options...]"
+    opts.separator ""
+    opts.separator "Options (must specify as-number and bgp-identifier at least):"
+    
+    opts.on("-h", "--help", "Show this message") { print opts; exit }
+
+    opts.on("-a", "--as-number", Integer, "Set local AS number (default 65534)") do |as|
+      options[:autonomous_system] = as
+    end
+
+    opts.on("-i", "--bgp-identifier IP.ADDRESS", "Set BGP identifier") do |bgp_identifier|
+      options[:bgp_identifier] = bgp_identifier
+    end
+
+    opts.on("-r", "--routes FILE", "Set routes file (default #{options[:routes]})") do |routes|
+      options[:routes] = routes
+    end
+
+    opts.on("-p", "--peers FILE", "Set peers file (default #{options[:peers]})") do |peers|
+      options[:peers] = peers
+    end
+
+    opts.on("--local-pref PREF", Integer, "Set local preference (default #{options[:local_pref]})") do |local_pref|
+      options[:local_pref] = local_pref
+    end
+
+    opts.on("--hold-time SECS", Integer, "Set hold time (default #{options[:hold_time]})") do |hold_time|
+      options[:hold_time] = hold_time
+    end
+
+    opts.on("--communities a,b,c", Array, "Set list of communities (default '#{options[:communities].join(",")}')") do |communities|
+      options[:communities] = Update.parse_communities(communities)
+    end
+
+    opts.on("--log-level LEVEL", "Set log level (default INFO)") do |level|
+      options[:logger].level = Logger.const_get(level)
+    end
+
+    opts.on("--log-file FILE", "Set log file (default STDOUT)") do |file|
+      options[:logger].close
+      options[:logger] = Logger.new(file)
+    end
+
+    opts.parse!(ARGV)
+  end
+
+  if !options[:bgp_identifier]
+    STDERR.print "Must specify --bgp-identifier x.x.x.x (where x.x.x.x is your IP)\n"
     exit 1
   end
-  if ENV['BGPFEEDER_LOG_LEVEL']
-    Log.level = Logger.const_get(ENV['BGPFEEDER_LOG_LEVEL'])
-  else
-    Log.level = Logger::INFO
-  end
-  db = Database.new(ARGV[0].to_i, ARGV[1], ARGV[2].to_i, ARGV[3], ARGV[4])
-  peers = PeerManager.new(ARGV[5], db)
+
+  BGP.const_set(:Log, options[:logger])
+  options.delete(:logger)
+  Log.info("Starting from command line with options: "+options.inspect)
+  
+  db = Database.new(
+    options[:autonomous_system], 
+    options[:bgp_identifier], 
+    options[:routes]
+  )
+  db.communities = options[:communities]
+  db.local_pref = options[:local_pref]
+  db.hold_time = options[:hold_time]
+  peers = PeerManager.new(options[:peers], db)
   peers.run
 end

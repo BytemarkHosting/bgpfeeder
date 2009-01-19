@@ -700,9 +700,17 @@ if __FILE__ == $0
       options[:logger].level = Logger.const_get(level)
     end
 
-    opts.on("--log-file FILE", "Set log file (default STDOUT)") do |file|
+    opts.on("--log-file FILE", "Set log file (default STDOUT, or use SYSLOG)") do |file|
       options[:logger].close
-      options[:logger] = Logger.new(file)
+      if file == 'SYSLOG'
+        require 'syslog'
+        Syslog.module_eval { class << self; alias :error :err; end } # hack!
+        Syslog.module_eval { class << self; alias :warn :warning; end } # hack!
+        Syslog.open('bgpfeeder')
+        options[:logger] = Syslog
+      else
+        options[:logger] = Logger.new(file)
+      end
     end
 
     opts.parse!(ARGV)

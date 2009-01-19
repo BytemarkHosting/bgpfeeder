@@ -92,7 +92,7 @@ module BGP
     #
     _IP = '\d+\.\d+\.\d+\.\d+'
     FORMAT_LINUX = /^(#{_IP}\/\d+) (?:via )(#{_IP})/
-    FORMAT_CISCO = /^(?:ip route )(#{_IP}) (#{_IP}) (#{_IP})/
+    FORMAT_CISCO = /^(?:ip route )?(#{_IP}) (#{_IP}) (#{_IP})/
     FORMAT_COMMUNITIES = /\Wcommunities ([\d\:\,]+)/
     FORMAT_LOCAL_PREF  = /\Wlocal_pref (\d+)/
 
@@ -551,7 +551,10 @@ module BGP
       Log.info "routes file updated at #{@file.last_updated}: "+
         "#{routes_to_add.length} added, "+
         "#{routes_to_delete.length} deleted, "+
-        "#{routes_to_change.length} changed"
+        "#{routes_to_change.length} changed" unless
+        routes_to_add.empty? && 
+        routes_to_delete.empty? &&
+        routes_to_change.empty?
 
       routes_to_add.each { |route| Log.warn "adding route #{route}" }
       routes_to_delete.each { |route| Log.warn "deleting route #{route}" }
@@ -665,11 +668,11 @@ if __FILE__ == $0
     
     opts.on("-h", "--help", "Show this message") { print opts; exit }
 
-    opts.on("-a", "--as-number", Integer, "Set local AS number (default 65534)") do |as|
-      options[:autonomous_system] = as
+    opts.on("-a", "--as-number NUM", Integer, "Set local AS number (default 65534)") do |as_num|
+      options[:autonomous_system] = as_num
     end
 
-    opts.on("-i", "--bgp-identifier IP.ADDRESS", "Set BGP identifier") do |bgp_identifier|
+    opts.on("-i", "--bgp-identifier MY.IP.ADDRESS", "Set BGP identifier") do |bgp_identifier|
       options[:bgp_identifier] = bgp_identifier
     end
 

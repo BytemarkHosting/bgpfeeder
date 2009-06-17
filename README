@@ -268,11 +268,13 @@ configuration):
   write memory
 }}}
 
-You should now be able to ping 10.0.0.1 to talk to your virtual Cisco.
+You should now be able to ping 10.0.0.1 to talk to your virtual Cisco.  
 
 Then run bgpfeeder as before but your peer address will be simply
 "10.0.0.1"; the IOS output is very helpful when things go wrong, and you can
-"show ip bgp" to see which routes are being received. 
+"show ip bgp" to see which routes are being received.  I also find that
+"debug ip bgp all", "debug ip bgp events" and "debug ip bgp updates" are
+very useful to have turned on.
 
 = Copyright =
 

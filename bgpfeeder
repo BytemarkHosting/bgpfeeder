@@ -144,13 +144,15 @@ module BGP
     attr_reader :remote_port
     def peer_spec; "#{remote_host}:#{remote_port}"; end
 
-    def initialize(database, peer_spec)
+    def initialize(database, peer_spec, initial_sleep=nil)
       @database = database
       @hold_time = database.hold_time # possibly overridden by remote OPEN
 
       @remote_host, @remote_port = peer_spec.split(":", 2)
       @remote_port = @remote_port.to_i
       @remote_port = 179 if @remote_port == 0
+
+      @initial_sleep = initial_sleep
 
       @closed = false
     end
@@ -161,22 +163,50 @@ module BGP
 
     def run
       begin
+        if @initial_sleep
+          Log.warn("Sleeping for #{@initial_sleep}s due to previous error")
+          sleep @initial_sleep
+        end
         real_run
       rescue Exception => ex
-        Log.error("Uncaught exception in peer thread: #{ex}")
+        Log.error("Uncaught exception in peer thread, re-raising: #{ex}")
         Log.error(ex.backtrace.join("\n"))
+        raise
       end
     end
 
     def real_run
       while !@closed
         started = Time.now
+        connect_error_reported = false
 
         begin
-          @s = TCPSocket.new(@remote_host, @remote_port)
-        rescue Errno::ECONNREFUSED, Errno::ETIMEDOUT => e
-          l_warn("failed BGPv4 connection due to #{e}, will try again in 60s")
-          sleep 60
+          timeout(10) do
+            @s = TCPSocket.new(@remote_host, @remote_port)
+          end
+          if connect_error_reported
+            l_warn("Connection established after #{Time.now - started}s")
+          end
+        # 
+        # Try to predict some errors that we'll see if BGP peers come and go
+        # on the network - others will abort the peer thread with messier
+        # error.
+        #
+        rescue Timeout::Error,
+               Errno::ECONNREFUSED, 
+               Errno::ETIMEDOUT, 
+               Errno::EHOSTDOWN,
+               Errno::EHOSTUNREACH,
+               Errno::ENETDOWN,
+               Errno::ENETUNREACH,
+               Errno::ENETRESET,
+               Errno::ECONNABORTED,
+               Errno::ECONNRESET => e
+          if !connect_error_reported
+            l_warn("Failed BGPv4 connection due to #{e}, will keep trying every 10s")
+            connect_error_reported = true
+          end
+          sleep 10
           break if @closed
           retry
         end
@@ -553,8 +583,8 @@ module BGP
         "#{routes_to_delete.length} deleted, "+
         "#{routes_to_change.length} changed"
 
-      routes_to_add.each { |route| Log.warn "adding route #{route}" }
       routes_to_delete.each { |route| Log.warn "deleting route #{route}" }
+      routes_to_add.each { |route| Log.warn "adding route #{route}" }
       routes_to_change.each { |route| Log.warn "changing route #{route}" }
 
       # rewrite since we've pulled this out of our current route table
@@ -563,10 +593,14 @@ module BGP
         route.next_hop = nil
       end
 
-       # add this calculated set of route updates to our log
+      # Add this calculated set of route updates to our log
+      #  
+      # NB we must always send withdraw requests before we add new routes,
+      # in case the prefix is the same but the other attributes differ.
+      #
       @route_updates << [@file.last_updated, 
-        routes_to_add +
         routes_to_delete +
+        routes_to_add +
         routes_to_change
       ]
 
@@ -588,10 +622,15 @@ module BGP
       @file = FileWatcher.new(file)
       @database = database
       @peer_threads = {}
+      @close_all = false
+    end
+
+    def close_all
+      @close_all = true
     end
 
     def run
-      loop do
+      while !@close_all || !@peer_threads.empty?
         if @file.updated?
 
           # Work out which peers have been added, and which removed
@@ -621,6 +660,13 @@ module BGP
             peer_list_new.length == 0
         end
 
+        if @close_all
+          Log.info("closing all peer connections")
+          @peer_threads.each do |name, peer_thread|
+            peer_thread[:peer].close
+          end
+        end
+
         sleep 1
 
         # Reap any that have finished
@@ -632,11 +678,15 @@ module BGP
             Log.info "peer thread #{peer_spec} finished normally"
             @peer_threads.delete(peer_spec)
           rescue Exception => ex
-            Log.error "peer thread #{peer_spec} finished with an exception: #{ex}"
+            Log.error "peer thread #{peer_spec} finished with an exception, will restart in 5 mins but may indicate a bug: #{ex}"
             Log.error ex.backtrace.join("\n")+"\n"
+            resurrected_peer = Peer.new(@database, peer_spec, 300)
+            @peer_threads[peer_spec] = Thread.new { resurrected_peer.run }
+            @peer_threads[peer_spec][:peer] = resurrected_peer
           end
         end
       end
+      Log.info("all peers exited, goodbye")
     end
   end 
 end
@@ -723,5 +773,7 @@ if __FILE__ == $0
   db.local_pref = options[:local_pref]
   db.hold_time = options[:hold_time]
   peers = PeerManager.new(options[:peers], db)
+  # first interrupt should kill all connections,
+  trap("INT") { peers.close_all; trap("INT","DEFAULT") }
   peers.run
 end

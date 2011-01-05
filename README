@@ -68,13 +68,18 @@ Options (must specify as-number and bgp-identifier at least):
         --log-file FILE              Set log file (default STDOUT)
 }}}
 
-The peers file contains a list of BGP peers.  When a new peer is seen for
-the first time, the program continually tries to connect to it and send its
-current complete route list.  When a peer is removed from the list, the BGP
-connection is terminated.  Peers are IPv4 addresses, and can have a port
-specifier i.e. either ''80.68.80.1'' or ''127.0.0.1:1234''.  The latter can
-be useful for testing (though no real BGP speaker will listen on a port
-other than the default 179).
+The peers file contains a list of BGP peers (and TCP-MD5 passwords for each one).
+
+When a new peer is seen for the first time, the program continually tries to 
+connect to it and send its current complete route list.  When a peer is removed 
+from the list, the BGP connection is terminated.  Peers are IPv4 addresses, and 
+can have a port specifier i.e. either ''80.68.80.1'' or ''127.0.0.1:1234''.  The
+latter can be useful for testing (though no real BGP speaker will listen on a 
+port other than the default 179).  You can also specify an optional second 
+parameter after a space, which is the TCP-MD5 password  e.g. 
+''80.68.80.1 my_session_secret'' would specify peer 80.68.80.1 with the password
+my_session_secret.  If no password is specified, an ordinary TCP session will
+be used.
 
 The routes file contains a list of static routes with "next hop" specifiers. 
 These can either be in roughly "Linux" or "Cisco" formats; e.g. any of these
@@ -152,7 +157,7 @@ when this happens but I'm not sure how big a risk this is.
 
  * "Expected OPEN, got  instead" log message - peers don't open first time, 
    should work again after retry 20s later.
-
+ 
  * It will eat memory in proportion to the number of changes in the routes
    file because it keeps a complete update log in RAM.
 
@@ -263,6 +268,7 @@ configuration):
     
     router bgp 65534
       neighbor 10.0.0.2 remote-as 65534
+      neighbor 10.0.0.2 password TopSecret
       exit
     exit
   write memory
@@ -271,14 +277,14 @@ configuration):
 You should now be able to ping 10.0.0.1 to talk to your virtual Cisco.  
 
 Then run bgpfeeder as before but your peer address will be simply
-"10.0.0.1"; the IOS output is very helpful when things go wrong, and you can
-"show ip bgp" to see which routes are being received.  I also find that
-"debug ip bgp all", "debug ip bgp events" and "debug ip bgp updates" are
-very useful to have turned on.
+"10.0.0.1 TopSecret"; the IOS output is very helpful when things go wrong, 
+and you can "show ip bgp" to see which routes are being received.  I also 
+find that "debug ip bgp all", "debug ip bgp events" and "debug ip bgp updates" 
+are very useful to have turned on.
 
 = Copyright =
 
-bgpfeeder is (C) Bytemark Hosting 2009, and may be distributed according to
-the terms of the GNU General Public License version 3 ONLY.
+bgpfeeder is (C) Bytemark Hosting 2009-2011, and may be distributed according 
+to the terms of the GNU General Public License version 3 ONLY.
 
 

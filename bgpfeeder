@@ -1,5 +1,8 @@
 #!/usr/bin/ruby
-# Simple BGP talker implemented from RFC1771 and RFC1997
+# Simple BGP talker implemented from:
+# * RFC1771
+# * RFC1997
+# * RFC2385
 #
 # See http://src.bytemark.co.uk/trac/bgpfeeder for later versions and more
 # information.
@@ -15,7 +18,7 @@ require 'optparse'
 
 class IPAddr
   MASK_REVERSE = {}
-  (0..32).each { |b| MASK_REVERSE[4294967296 - (1<<b)] = 32-b }
+  (0..32).each { |b| MASK_REVERSE[4294967296 - (1<< b)] = 32-b }
 
   # BGP update messages contain IP prefixes encoded as <length,prefix>
   # tuples where length is 0-4 and prefix is the number of relevant
@@ -42,6 +45,38 @@ class IPAddr
 
   def hash
     to_i | @mask_addr << 32 # good enough for IPv4
+  end
+end
+
+# A Linux-specific class to set up a RFC2385-compliant MD5-secured TCP 
+# connection.
+#
+class TCPMD5Socket < Socket
+  IPPROTO_TCP =  6 # linux/in.h
+  TCP_MD5SIG  = 14 # linux/tcp.h
+  TCP_MD5SIG_MAXKEYLEN = 80 # linux/tcp.h
+  
+  # Works exactly the same as TCPSocket.open except you can supply a password
+  # to pass to the kernel for MD5 authhentication.
+  #
+  def initialize(host, port, password)
+    raise ArgumentError.new("Password is too long") if 
+      password.length > TCP_MD5SIG_MAXKEYLEN
+      
+    family = Socket.const_get(IPAddr.new(host).ipv4? ? "AF_INET" : "AF_INET6")
+    super(family, Socket::SOCK_STREAM, 0)      
+    # struct tcp_md5sig {
+    # 	struct __kernel_sockaddr_storage tcpm_addr;	/* address associated */
+    # 	__u16	__tcpm_pad1;				/* zero */
+    # 	__u16	tcpm_keylen;				/* key length */
+    # 	__u32	__tcpm_pad2;				/* zero */
+    # 	__u8	tcpm_key[TCP_MD5SIG_MAXKEYLEN];		/* key (binary) */
+    # };
+    tcp_md5sig_buffer = [
+      Socket.pack_sockaddr_in(port, host), 0, password.length, 0, password
+    ].pack("a128SSLa#{TCP_MD5SIG_MAXKEYLEN}")    
+    setsockopt(IPPROTO_TCP, TCP_MD5SIG, tcp_md5sig_buffer)
+    connect(Socket.pack_sockaddr_in(port, host))
   end
 end
 
@@ -144,10 +179,21 @@ module BGP
     attr_reader :remote_port
     def peer_spec; "#{remote_host}:#{remote_port}"; end
 
+    # Initialise a new peer based on the given Database, and peer_spec.  The
+    # peer_spec can be one of:
+    #
+    #   "1.2.3.4"
+    #   "1.2.3.4:1799"
+    #   "1.2.3.4 my_session_secret"
+    #
+    # i.e. you can specify an optional TCP port number, and TCP-MD5 secret.
+    #
+    #
     def initialize(database, peer_spec, initial_sleep=nil)
       @database = database
       @hold_time = database.hold_time # possibly overridden by remote OPEN
 
+      peer_spec, @tcp_md5_secret = peer_spec.split(/\s+/,2)
       @remote_host, @remote_port = peer_spec.split(":", 2)
       @remote_port = @remote_port.to_i
       @remote_port = 179 if @remote_port == 0
@@ -182,7 +228,9 @@ module BGP
 
         begin
           timeout(10) do
-            @s = TCPSocket.new(@remote_host, @remote_port)
+            @s = @tcp_md5_secret ?
+              TCPMD5Socket.new(@remote_host, @remote_port, @tcp_md5_secret) :
+              TCPSocket.new(@remote_host, @remote_port)
           end
           if connect_error_reported
             l_warn("Connection established after #{Time.now - started}s")
@@ -636,10 +684,13 @@ module BGP
       while !@close_all || !@peer_threads.empty?
         if @file.updated?
 
-          # Work out which peers have been added, and which removed
+          # Work out which peers have been added, and which removed.  We
+          # treat a peer line with a different TCP-MD5 secret as a different
+          # peer, which means the session will be reestablished if the user
+          # changes the secret.
           #
           peer_list_new = @file.read_lines.
-            select { |l| /^[\d+\.\:]+$/.match(l) }
+            select { |l| /^[\d+\.\:]+( .*)?$/.match(l) }
           peer_list_finished = @peer_threads.keys - peer_list_new
           peer_list_to_start = peer_list_new - @peer_threads.keys
 

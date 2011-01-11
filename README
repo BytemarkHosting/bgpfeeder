@@ -2,10 +2,11 @@
 by Matthew Bloch <matthew@bytemark.co.uk>
 
 bgpfeeder is a program to feed a BGPv4 speaker with an infrequently changing
-list of static internal routes.  We intend to use it at Bytemark to
-rearrange routing information from our "network organiser" database, to
-avoid staff having to log in to core routers to effect common routing
-changes.
+list of static internal routes.  We use it at Bytemark to rearrange routing 
+information from our "network organiser" database, to avoid staff having to 
+log in to core routers to effect common routing changes.  We also use it to 
+communicate with transit providers to communicate "black hole" information
+about traffic we don't want passed on to our routers.
 
 = Quick start =
 
@@ -99,11 +100,16 @@ Duplicate routes in the route file will be ignored.
 
 As well as the obvious NEXT_HOP attribute (3), the BGP UPDATE messages sent
 by bgpfeeder contain an ORIGIN setting indicating that these have been
-learned by an IGP, a zero-length AS path, and a local preference which the
-administrator sets.
+learned by an IGP.
 
-You can also specify local_pref and communities values on a route-by-route
-basis, e.g.
+For "exterior" BGP, where the peer's AS# is different from our local one,
+we send our AS as the full path, and no local preference.
+
+For "interior" BGP, where we're in the same AS as our peer, we send a zero-
+length AS path, and a local preference attribute.
+
+You can specify local_pref and communities values on a route-by-route basis, 
+e.g.
 
 {{{
 10.0.0.0/24 via 192.168.0.1 communities 65534:111

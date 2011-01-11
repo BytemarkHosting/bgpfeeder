@@ -60,6 +60,7 @@ class TCPMD5Socket < Socket
   # to pass to the kernel for MD5 authhentication.
   #
   def initialize(host, port, password)
+
     raise ArgumentError.new("Password is too long") if 
       password.length > TCP_MD5SIG_MAXKEYLEN
       
@@ -186,7 +187,9 @@ module BGP
     #   "1.2.3.4:1799"
     #   "1.2.3.4 my_session_secret"
     #
-    # i.e. you can specify an optional TCP port number, and TCP-MD5 secret.
+    # i.e. it is a list of IP addresses, but you can also specify:
+    # * a TCP port number (by appending e.g. :1799 to the IP);
+    # * a TCP-MD5 password (as a second argument).
     #
     #
     def initialize(database, peer_spec, initial_sleep=nil)
@@ -310,6 +313,10 @@ module BGP
       else
         send_notification(1,1,"Expected OPEN, got #{type} instead") if type != TYPE_OPEN
         send_notification(2,1,"Unsupported BGP version, peer is speaking v#{message[0]}") if message[0] != 4
+        @peer_autonomous_system = message[1..2].unpack("n")
+        l_info "Peer is AS#{@peer_autonomous_system}, assuming "+
+          (ebgp? ? "exterior" : "interior")+
+          " BGP conventions"
         peer_hold_time = message[3..4].unpack("n")[0]
         @hold_time = peer_hold_time if peer_hold_time < @database.hold_time
         l_debug "hold time for connection is #{@hold_time}s, sending first KEEPALIVE"
@@ -317,6 +324,11 @@ module BGP
         true
       end
     end
+    
+    def ibgp?
+      @peer_autonomous_system == @database.autonomous_system
+    end
+    def ebgp?; !ibgp?; end
 
     # Simple polling loop to check for updates and respond to incoming
     # messages appropriately.  Can probably fix this to use IO.select
@@ -400,6 +412,9 @@ module BGP
     ATTR_NEXT_HOP = 3
     ATTR_LOCAL_PREF = 5
     ATTR_COMMUNITIES = 8
+    
+    AS_SET = 1
+    AS_SEQUENCE = 2
 
     ATYPE_OPTIONAL = 128
     ATYPE_TRANSITIVE = 64
@@ -431,16 +446,29 @@ module BGP
         #
         # The only attribute that provides different information is NEXT_HOP
         # (obviously) but we are obliged to supply ORIGIN (set to internal
-        # gateway protocol), AS_PATH (which is empty, because we're never
-        # talking to a peer outside of our AS, I hope), and LOCAL_PREF which
-        # is set by the database.
+        # gateway protocol) and LOCAL_PREF which is set by the database.
+        # AS_PATH is zero-length if we're talking to an interior BGP peer,
+        # and set to our local AS# if we're talking to an external peer.
         #
         if update.next_hop
+        
+          # AS path is empty over IBGP, otherwise just set to [local_as]
+          as_path_segments = ibgp? ? "" :
+            [AS_SEQUENCE, 1, @database.autonomous_system].pack("ccn")
+        
+          # always send ORIGIN, AS_PATH and NEXT_HOP
           path_attributes_raw = 
             [ATYPE_TRANSITIVE, ATTR_ORIGIN, 1, 0].pack("cccc")+
-            [ATYPE_TRANSITIVE, ATTR_AS_PATH, 0].pack("ccc")+
-            [ATYPE_TRANSITIVE, ATTR_NEXT_HOP, 4, update.next_hop.to_i].pack("cccN")+
-            [ATYPE_TRANSITIVE, ATTR_LOCAL_PREF, 4, update.local_pref].pack("cccN")
+            [ATYPE_TRANSITIVE, ATTR_AS_PATH, as_path_segments.length].pack("ccc")+
+            as_path_segments+
+            [ATYPE_TRANSITIVE, ATTR_NEXT_HOP, 4, update.next_hop.to_i].pack("cccN")
+          
+          # only send LOCAL_PREF over interior connections
+          if ibgp?
+            path_attributes_raw += [
+              ATYPE_TRANSITIVE, ATTR_LOCAL_PREF, 4, update.local_pref
+            ].pack("cccN")
+          end
 
           if update.communities.length > 0
             path_attributes_raw += [ATYPE_TRANSITIVE | ATYPE_OPTIONAL, ATTR_COMMUNITIES].pack("cc")

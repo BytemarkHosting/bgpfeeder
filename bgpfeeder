@@ -313,7 +313,7 @@ module BGP
       else
         send_notification(1,1,"Expected OPEN, got #{type} instead") if type != TYPE_OPEN
         send_notification(2,1,"Unsupported BGP version, peer is speaking v#{message[0]}") if message[0] != 4
-        @peer_autonomous_system = message[1..2].unpack("n")
+        @peer_autonomous_system = message[1..2].unpack("n")[0]
         l_info "Peer is AS#{@peer_autonomous_system}, assuming "+
           (ebgp? ? "exterior" : "interior")+
           " BGP conventions"

@@ -192,7 +192,7 @@ module BGP
     # * a TCP-MD5 password (as a second argument).
     #
     #
-    def initialize(database, peer_spec, initial_sleep=nil)
+    def initialize(database, peer_spec, initial_sleep=nil, local_host=nil)
       @database = database
       @hold_time = database.hold_time # possibly overridden by remote OPEN
 
@@ -202,6 +202,8 @@ module BGP
       @remote_port = 179 if @remote_port == 0
 
       @initial_sleep = initial_sleep
+
+      @local_host=local_host
 
       @closed = false
     end
@@ -233,7 +235,7 @@ module BGP
           timeout(10) do
             @s = @tcp_md5_secret ?
               TCPMD5Socket.new(@remote_host, @remote_port, @tcp_md5_secret) :
-              TCPSocket.new(@remote_host, @remote_port)
+              TCPSocket.new(@remote_host, @remote_port, @local_host)
           end
           if connect_error_reported
             l_warn("Connection established after #{Time.now - started}s")
@@ -697,11 +699,12 @@ module BGP
   end
 
   class PeerManager
-    def initialize(file, database)
+    def initialize(file, database, local_host=nil)
       @file = FileWatcher.new(file)
       @database = database
       @peer_threads = {}
       @close_all = false
+      @local_host=local_host
     end
 
     def close_all
@@ -733,7 +736,7 @@ module BGP
           #
           peer_list_to_start.each do |peer_spec|
             Log.info "starting new peer #{peer_spec}"
-            peer = Peer.new(@database, peer_spec)
+            peer = Peer.new(@database, peer_spec, nil, @local_host)
             @peer_threads[peer_spec] = Thread.new { peer.run }
             @peer_threads[peer_spec][:peer] = peer
           end
@@ -762,7 +765,7 @@ module BGP
           rescue Exception => ex
             Log.error "peer thread #{peer_spec} finished with an exception, will restart in 5 mins but may indicate a bug: #{ex}"
             Log.error ex.backtrace.join("\n")+"\n"
-            resurrected_peer = Peer.new(@database, peer_spec, 300)
+            resurrected_peer = Peer.new(@database, peer_spec, 300, @local_host)
             @peer_threads[peer_spec] = Thread.new { resurrected_peer.run }
             @peer_threads[peer_spec][:peer] = resurrected_peer
           end
@@ -786,7 +789,8 @@ if __FILE__ == $0
     :autonomous_system => 65534,
     :routes => 'routes',
     :peers => 'peers',
-    :communities => []
+    :communities => [],
+    :local_host => nil
   }
   options[:logger].level = Logger::INFO
 
@@ -829,6 +833,10 @@ if __FILE__ == $0
       options[:logger].level = Logger.const_get(level)
     end
 
+    opts.on("--local-host x.x.x.x", "Set the local interface to connect from") do |local_host|
+      options[:local_host] = local_host
+    end
+
     opts.on("--log-file FILE", "Set log file (default STDOUT, or use SYSLOG)") do |file|
       options[:logger].close
       if file == 'SYSLOG'
@@ -862,7 +870,7 @@ if __FILE__ == $0
   db.communities = options[:communities]
   db.local_pref = options[:local_pref]
   db.hold_time = options[:hold_time]
-  peers = PeerManager.new(options[:peers], db)
+  peers = PeerManager.new(options[:peers], db, options[:local_host])
   # first interrupt should kill all connections,
   trap("INT") { peers.close_all; trap("INT","DEFAULT") }
   peers.run

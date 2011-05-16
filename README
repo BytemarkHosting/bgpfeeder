@@ -1,18 +1,19 @@
 = bgpfeeder =
 by Matthew Bloch <matthew@bytemark.co.uk>
 
-bgpfeeder is a program to feed a BGPv4 speaker with an infrequently changing
-list of static internal routes.  We use it at Bytemark to rearrange routing 
-information from our "network organiser" database, to avoid staff having to 
-log in to core routers to effect common routing changes.  We also use it to 
-communicate with transit providers to communicate "black hole" information
-about traffic we don't want passed on to our routers.
+bgpfeeder is a program to feed a BGPv4 speaker with an infrequently
+changing list of static internal routes.  We use it at Bytemark to
+rearrange routing information from our "network organiser" database,
+to avoid staff having to log in to core routers to effect common
+routing changes.  We also use it to communicate with transit providers
+to communicate "black hole" information about traffic we don't want
+passed on to our routers.
 
 = Quick start =
 
 bgpfeeder is portable and should run on any system that has Ruby 1.8
-installed (though only tested on Linux).  Here's an example of how to use
-it:
+installed (though only tested on Linux).  Here's an example of how to
+use it:
 
 {{{
 # These are the routes I'd like distributed:
@@ -30,7 +31,7 @@ echo '80.68.80.2' > peers
 # Start bgpfeeder as AS 65534, BGP ID 80.68.80.1 and set the local_pref
 # value to 200 unless otherwise specified.
 #
-./bgpfeeder -a 65534 -i 80.68.80.1 --local-pref 200
+./bgpfeeder --as-number 65534 --bgp-identifier 80.68.80.1 --local-pref 200
 
 #
 # Go ahead and change the routes / peers files after the program has
@@ -39,13 +40,13 @@ echo '80.68.80.2' > peers
 
 = How to use =
 
-bgpfeeder is configured with a set of static parameters on the command line
-which cannot be changed once started.  These are your routers' AS number and
-BGP identifier (i.e. your local IPv4 address).  You can also set the
-local_pref value for the routes and the list of communities to add to every
-route which may be useful extra information for your routers to filter on. 
-Finally there is the hold time which defaults to 60s, and some logging
-settings.
+bgpfeeder is configured with a set of static parameters on the command
+line which cannot be changed once started.  These are your routers' AS
+number and BGP identifier (which is usually the IPv4 address of the
+router).  You can also set the local_pref value for the routes and the
+list of communities to add to every route which may be useful extra
+information for your routers to filter on.  Finally there is the hold
+time which defaults to 60s, and some logging settings.
 
 The administrator also specifies filenames of two database files: the peers
 file, and the routes file.  These are the two lists which can change while
@@ -71,20 +72,27 @@ Options (must specify as-number and bgp-identifier at least):
 
 The peers file contains a list of BGP peers (and TCP-MD5 passwords for each one).
 
-When a new peer is seen for the first time, the program continually tries to 
-connect to it and send its current complete route list.  When a peer is removed 
-from the list, the BGP connection is terminated.  Peers are IPv4 addresses, and 
-can have a port specifier i.e. either ''80.68.80.1'' or ''127.0.0.1:1234''.  The
-latter can be useful for testing (though no real BGP speaker will listen on a 
-port other than the default 179).  You can also specify an optional second 
-parameter after a space, which is the TCP-MD5 password  e.g. 
-''80.68.80.1 my_session_secret'' would specify peer 80.68.80.1 with the password
-my_session_secret.  If no password is specified, an ordinary TCP session will
-be used.
+When a new peer is seen for the first time, the program continually
+tries to connect to it and send its current complete route list.  When
+a peer is removed from the list, the BGP connection is terminated.
+Peers are IPv4 or IPv6 addresses, and can have a port specifier
+i.e. all of these are valid:
 
-The routes file contains a list of static routes with "next hop" specifiers. 
-These can either be in roughly "Linux" or "Cisco" formats; e.g. any of these
-means the same thing:
+* 80.68.80.1
+* 127.0.0.1:1234
+* fc00:1234::1
+* [fc00:1234::1]:1234
+
+The port syntax can be useful for testing (though no real BGP speaker
+will listen on a port other than the default 179).  You can also
+specify an optional second parameter after a space, which is the
+TCP-MD5 password e.g.  ''80.68.80.1 my_session_secret'' would specify
+peer 80.68.80.1 with the password my_session_secret.  If no password
+is specified, an ordinary TCP socket will be used.
+
+The routes file contains a list of static routes with "next hop"
+specifiers.  These can either be in roughly "Linux" or "Cisco"
+formats; e.g. any of these means the same thing:
 
 {{{
 10.0.0.0/24 192.168.0.1
@@ -96,7 +104,13 @@ ip route 10.0.0.0 255.255.255.0 192.168.0.1
 i.e. routing the IP block '''10.0.0.0/24''' via the next hop of
 '''192.168.0.1'''. 
 
-Duplicate routes in the route file will be ignored.
+Duplicate routes in the route file will be ignored.  You may also
+specify IPv6 routes in the usual formats:
+
+{{{
+aaaa:bbbb:cccc:dddd::/64 fc00:1234::1
+aaaa:bbbb:cccc:dddd::/64 via fc00:1234::1
+}}}
 
 As well as the obvious NEXT_HOP attribute (3), the BGP UPDATE messages sent
 by bgpfeeder contain an ORIGIN setting indicating that these have been
@@ -116,48 +130,85 @@ e.g.
 10.0.1.0/24 via 192.168.0.2 communities 65534:111,0xff001122 local_pref 50
 }}}
 
-The local_pref in the routes file will always override the value set on the
-command line.  However communities set on the command line will always be
-present, and those specified in the routes file will be appended to the
-list.
+The local_pref in the routes file will always override the value set
+on the command line.  However communities set on the command line will
+always be present, and those specified in the routes file will be
+appended to the list.
 
-The routes file is checked for differences whenever it is changed and UPDATE
-messages sent to current peers accordingly.  When routes are removed, the
-message puts the route into the 'withdrawn' section.  When routes are
-replaced, the same UPDATE message contains both the withdrawn route and the
-new new one so the peer can update its database without a "flap" (i.e.
-removing the route and adding it again).
+The routes file is checked for differences whenever it is changed and
+UPDATE messages sent to current peers accordingly.  When routes are
+removed, the message puts the route into the 'withdrawn' section.
+When routes are replaced, the same UPDATE message contains both the
+withdrawn route and the new new one so the peer can update its
+database without a "flap" (i.e.  removing the route and adding it
+again).
+
+IPv6 route updates are always sent using the multiprotocol extensions,
+and IPv4 updates are always sent using "plain" BGPv4 UPDATE messages,
+even if the peer supports multiprotocol extensions (I'm not sure which
+is customary, this is just what wseemed to work against an IPv4 and
+IPv6 neighbour specification under IOS).
 
 The peers file is checked for differences whenever it is changed; new peers
 are started within a second.  Old peers are signalled to close straight away
 but may take a few seconds to close down properly.  Exactly-specified
 duplicates will be ignored.
 
+= Multiple sets of routes & peers, IPv6 support =
+
+When you have established a BGP session to a peer over IPv6, you
+probably want to avoid sending IPv4 routes over the same connection.
+To avoid having to start lots of copies of bgpfeeder, you can instead
+specify --routes and --peers multiple times, and maintain separate
+databases of IPv4 and IPv6 routes, e.g:
+
+{{{
+./bgpfeeder ... --routes r4 --peers p4 \
+                --routes r6 --peers p6
+}}}
+
+tells the program to send the routes in the file 'r4' to the peers in
+file 'p4' and the same for files 'r6' and 'p6'.
+
+There is nothing stopping you from using as many -r and -p directives
+as you need if you wanted to maintain lots of separate bgpfeeder
+sessions.
+
+If you try to feed IPv6 routes to a peer that does not understand BGP
+multiprotocol extensions, those routes will be silently ignored.
+
+When bgpfeeder first connects to any peer, it declares its own
+multiprotocol support.  If gets a Notification back that suggests the
+peer doesn't understand IPv6, it will disconnect and try again
+without.
+
 = Limitations =
 
-There should be no limits on the size of the routes and peers files other
-than what the system imposes.  The routes file is re-read and parsed in its
-entirety when it is changed, so updates may be slower to get into the BGP
-network the larger the file is.  However this is by design; the program is
-not intended to server very frequenty changing routes (i.e. more than about
-once per minute).
+There should be no limits on the size of the routes and peers files
+other than what the system imposes.  The routes file is re-read and
+parsed in its entirety when it is changed, so updates may be slower to
+get into the BGP network the larger the file is.  However this is by
+design; the program is not intended to serve very frequenty changing
+routes (i.e. more than about once per minute).
 
-bgpfeeder is not a "proper" BGPv4 daemon in that it doesn't listen on port
-179 for incoming connections, and discards any UPDATE messages from its
-peers.  Its state machine bears no relation to the complicated one described
-in RFC 1771.  None of this should affect it doing its job.
+bgpfeeder is not a "proper" BGPv4 daemon in that it doesn't listen on
+port 179 for incoming connections, and discards any UPDATE messages
+from its peers.  Its state machine bears no relation to the
+complicated one described in RFC 1771.  None of this should affect it
+doing its job.
 
-Received UPDATE messages generate a warning as the system is written in a
-scripting language which is relatively slow to handle large amounts of data. 
-If a peer is bombarding it with an entire internet routing table when it
-starts up, it will take a lot of CPU time to discard such information
-relative to a normal BGP program.
+Received UPDATE messages generate a warning as the system is written
+in a scripting language which is relatively slow to handle large
+amounts of data.  If a peer is bombarding it with an entire internet
+routing table when it starts up, it will take a lot of CPU time to
+discard such information relative to a normal BGP program.
 
 The program is pretty dim and basically single threaded (despite using
-Ruby-internal threads in a couple of places) so if it has to process large
-amounts of data on a particularly busy system, it may risk tripping hold
-times more than other BGP daemons might.  The logs should make clear
-when this happens but I'm not sure how big a risk this is.
+Ruby-internal threads in a couple of places) so if it has to process
+large amounts of data on a particularly busy system, it may risk
+tripping hold times more than other BGP daemons might.  The logs
+should make clear when this happens but I'm not sure how big a risk
+this is.
 
 = Known bugs =
 
@@ -167,10 +218,11 @@ when this happens but I'm not sure how big a risk this is.
  * It will eat memory in proportion to the number of changes in the routes
    file because it keeps a complete update log in RAM.
 
- * TODO: IPv6 support, track down relevant RFCs, fix regexps and so on.
- 
  * TODO: STDIN mode, allow user to make their own route and peer  updates
    fed from an external tool?
+
+ * Probably won't always detect when the BGP stream is corrupt, and will
+   crash out with a NoMethodError or something ugly.
 
 = Deployment example =
 
@@ -259,6 +311,7 @@ this command line:
     -s 0:0:tap:c7200
   ip link set c7200 up
   ip addr add 10.0.0.2/24 dev c7200
+  ip addr add fc00:1234::2/64 dev c7200
 }}}
 
 Then on the IOS command line (assuming a completely fresh router
@@ -267,14 +320,20 @@ configuration):
   enable
   configure terminal
     ip routing
+    ipv6 unicast-routing
+    ipv6 cef
+    
     interface FastEthernet0/0
       ip address 10.0.0.1 255.255.255.0
+      ipv6 address fc00:1234::1/64
       no shutdown
       exit
     
     router bgp 65534
       neighbor 10.0.0.2 remote-as 65534
       neighbor 10.0.0.2 password TopSecret
+      neighbor fc00:1234::2 remote-as 65534
+      neighbor fc00:1234::2 activate
       exit
     exit
   write memory

@@ -134,7 +134,7 @@ class IpAddrAndPort
     @from=nil
 
     if spec2
-      @from = IpAddrAndPort.new(spec1, port)
+      @from = IpAddrAndPort.new(spec1, nil)
       spec = spec2
     end
    
@@ -221,7 +221,7 @@ class TCPMD5Socket < Socket
   # Works exactly the same as TCPSocket.open except you can supply a password
   # to pass to the kernel for MD5 authhentication.
   #
-  def initialize(host, port, password)
+  def initialize(password, host, port, local_host=nil, local_port=nil)
 
     raise ArgumentError.new("Password is too long") if 
       password.length > TCP_MD5SIG_MAXKEYLEN
@@ -239,6 +239,7 @@ class TCPMD5Socket < Socket
       Socket.pack_sockaddr_in(port, host), 0, password.length, 0, password
     ].pack("a128SSLa#{TCP_MD5SIG_MAXKEYLEN}")    
     setsockopt(IPPROTO_TCP, TCP_MD5SIG, tcp_md5sig_buffer)
+    bind(Socket.pack_sockaddr_in(local_port, local_host)) if local_host || local_port
     connect(Socket.pack_sockaddr_in(port, host))
   end
 end
@@ -515,9 +516,21 @@ module BGP
 
         begin
           timeout(10) do
-            @s = @tcp_md5_secret ?
-              TCPMD5Socket.new(remote.ipaddr.to_s, remote.port, @tcp_md5_secret) :
-              TCPSocket.new(remote.ipaddr.to_s, remote.port)
+            @s = if @tcp_md5_secret
+                   if remote.from
+                     TCPMD5Socket.new(@tcp_md5_secret, remote.ipaddr.to_s, remote.port,
+                                      remote.from.ipaddr.to_s, remote.from.port)
+                   else
+                     TCPMD5Socket.new(@tcp_md5_secret, remote.ipaddr.to_s, remote.port)
+                   end                     
+                 else
+                   if remote.from
+                     TCPSocket.new(remote.ipaddr.to_s, remote.port,
+                                   remote.from.ipaddr.to_s, remote.from.port)
+                   else
+                     TCPSocket.new(remote.ipaddr.to_s, remote.port)
+                   end
+                 end
           end
           if connect_error_reported
             l_warn("Connection established after #{Time.now - started}s")
@@ -1162,7 +1175,7 @@ module BGP
           # changes the secret.
           #
           peer_list_new = @file.read_lines.
-            select { |l| /^[a-f\d+\.\:]+( .*)?$/.match(l) }
+            select { |l| /^[\[\]\-a-f\d+\.\:]+( .*)?$/.match(l) }
           peer_list_finished = @peer_threads.keys - peer_list_new
           peer_list_to_start = peer_list_new - @peer_threads.keys
 

@@ -1,4 +1,4 @@
-= bgpfeeder =
+h1. bgpfeeder
 by Matthew Bloch <matthew@bytemark.co.uk>
 
 bgpfeeder is a program to feed a BGPv4 speaker with an infrequently
@@ -9,13 +9,13 @@ routing changes.  We also use it to communicate with transit providers
 to communicate "black hole" information about traffic we don't want
 passed on to our routers.
 
-= Quick start =
+h1. Quick start
 
 bgpfeeder is portable and should run on any system that has Ruby 1.8
 installed (though only tested on Linux).  Here's an example of how to
 use it:
 
-{{{
+<pre>
 # These are the routes I'd like distributed:
 #
 echo '
@@ -36,9 +36,9 @@ echo '80.68.80.2' > peers
 #
 # Go ahead and change the routes / peers files after the program has
 # started, it will pick up any changes.
-}}}
+</pre>
 
-= How to use =
+h1. How to use
 
 bgpfeeder is configured with a set of static parameters on the command
 line which cannot be changed once started.  These are your routers' AS
@@ -54,7 +54,7 @@ the program is running.
 
 Here is the help:
 
-{{{
+<pre>
 Usage: ./bgpfeeder [options...]
 
 Options (must specify as-number and bgp-identifier at least):
@@ -65,10 +65,10 @@ Options (must specify as-number and bgp-identifier at least):
     -p, --peers FILE                 Set peers file (default peers)
         --local-pref PREF            Set local preference (default 100)
         --hold-time SECS             Set hold time (default 60)
-        --communities a,b,c          Set list of communities (default '')
+        --communities a,b,c          Set list of communities (default _)
         --log-level LEVEL            Set log level (default INFO)
         --log-file FILE              Set log file (default STDOUT)
-}}}
+</pre>
 
 The peers file contains a list of BGP peers (and TCP-MD5 passwords for each one).
 
@@ -86,7 +86,7 @@ i.e. all of these are valid:
 The port syntax can be useful for testing (though no real BGP speaker
 will listen on a port other than the default 179).  You can also
 specify an optional second parameter after a space, which is the
-TCP-MD5 password e.g.  ''80.68.80.1 my_session_secret'' would specify
+TCP-MD5 password e.g.  _80.68.80.1 my_session_secret_ would specify
 peer 80.68.80.1 with the password my_session_secret.  If no password
 is specified, an ordinary TCP socket will be used.
 
@@ -103,23 +103,23 @@ The routes file contains a list of static routes with "next hop"
 specifiers.  These can either be in roughly "Linux" or "Cisco"
 formats; e.g. any of these means the same thing:
 
-{{{
+<pre>
 10.0.0.0/24 192.168.0.1
 10.0.0.0/24 via 192.168.0.1
 10.0.0.0 255.255.255.0 192.168.0.1
 ip route 10.0.0.0 255.255.255.0 192.168.0.1
-}}}
+</pre>
 
-i.e. routing the IP block '''10.0.0.0/24''' via the next hop of
-'''192.168.0.1'''. 
+i.e. routing the IP block _10.0.0.0/24_ via the next hop of
+_192.168.0.1_. 
 
 Duplicate routes in the route file will be ignored.  You may also
 specify IPv6 routes in the usual formats:
 
-{{{
+<pre>
 aaaa:bbbb:cccc:dddd::/64 fc00:1234::1
 aaaa:bbbb:cccc:dddd::/64 via fc00:1234::1
-}}}
+</pre>
 
 As well as the obvious NEXT_HOP attribute (3), the BGP UPDATE messages sent
 by bgpfeeder contain an ORIGIN setting indicating that these have been
@@ -134,10 +134,10 @@ length AS path, and a local preference attribute.
 You can specify local_pref and communities values on a route-by-route basis, 
 e.g.
 
-{{{
+<pre>
 10.0.0.0/24 via 192.168.0.1 communities 65534:111
 10.0.1.0/24 via 192.168.0.2 communities 65534:111,0xff001122 local_pref 50
-}}}
+</pre>
 
 The local_pref in the routes file will always override the value set
 on the command line.  However communities set on the command line will
@@ -163,7 +163,7 @@ are started within a second.  Old peers are signalled to close straight away
 but may take a few seconds to close down properly.  Exactly-specified
 duplicates will be ignored.
 
-= Multiple sets of routes & peers, IPv6 support =
+h1. Multiple sets of routes & peers, IPv6 support
 
 When you have established a BGP session to a peer over IPv6, you
 probably want to avoid sending IPv4 routes over the same connection.
@@ -171,10 +171,10 @@ To avoid having to start lots of copies of bgpfeeder, you can instead
 specify --routes and --peers multiple times, and maintain separate
 databases of IPv4 and IPv6 routes, e.g:
 
-{{{
+<pre>
 ./bgpfeeder ... --routes r4 --peers p4 \
                 --routes r6 --peers p6
-}}}
+</pre>
 
 tells the program to send the routes in the file 'r4' to the peers in
 file 'p4' and the same for files 'r6' and 'p6'.
@@ -191,7 +191,7 @@ multiprotocol support.  If gets a Notification back that suggests the
 peer doesn't understand IPv6, it will disconnect and try again
 without.
 
-= Limitations =
+h1. Limitations
 
 There should be no limits on the size of the routes and peers files
 other than what the system imposes.  The routes file is re-read and
@@ -219,7 +219,7 @@ tripping hold times more than other BGP daemons might.  The logs
 should make clear when this happens but I'm not sure how big a risk
 this is.
 
-= Known bugs =
+h1. Known bugs
 
  * "Expected OPEN, got  instead" log message - peers don't open first time, 
    should work again after retry 20s later.
@@ -233,16 +233,16 @@ this is.
  * Probably won't always detect when the BGP stream is corrupt, and will
    crash out with a NoMethodError or something ugly.
 
-= Deployment example =
+h1. Deployment example
 
 If you were running the program on the IP 80.68.80.1, you might use a script
 like this:
 
-{{{
+<pre>
 cd /home/bgpfeeder
 ./bgpfeeder --as-number 65534 --bgp-identifier 80.68.80.1 \
   --host-time 60 --local-pref 100  --routes routes --peers peers
-}}}
+</pre>
 
 The program does not daemonise itself - an example init script is provided
 as bgpfeeder.init.d or you can make your own arrangements.
@@ -251,7 +251,7 @@ You can set the environment variable BGPFEEDER_LOG_LEVEL to one of DEBUG,
 INFO, WARN or ERROR to make the logging more or less verbose.  The default
 is WARN.
 
-It is important that the routes and peers files are updated ''atomically'',
+It is important that the routes and peers files are updated _atomically_,
 i.e.
 
  * DO use rsync if you are copying the peers & routes file on remotely
@@ -266,66 +266,67 @@ If you're talking to a core BGP router with a full routing table you may
 want to make sure that it never sends prefixes back to bgpfeeder with a
 configuration snippet like this (either quagga or Cisco):
 
-{{{
+<pre>
   access-list 100 deny ip any any
   router bgp xxx
      neighbor yyy distribute-list 100 out
-}}}
+</pre>
 
 Where xxx is your AS number and yyy is the BGP ID of your bgpfeeder
 instance.  
 
-= Testing against quagga =
+h1. Testing against quagga
 
 A half-finished test rig is included for use on Debian systems.  If you
 "rake test:qemu_shell" the system will build a Debian test system with a
 suitably configured BGP daemon, then dump you in a shell.  
 
 In the qemu window, run:
-{{{
+<pre>
   /usr/lib/quagga/bgpd &
   vtysh
   debug bgp updates
   debug bgp events
-}}}
+</pre>
 
 If you're not using qemu and setting up your own bgpd, I only needed the
 following file in /etc/quagga/bgpd.conf:
-{{{
+<pre>
   log stdout debugging
   router bgp 65534
     neighbor 10.0.2.2 remote-as 65534
-}}}
+</pre>
 
 Then in another window, run:
-{{{
+<pre>
   touch routes peers
   BGPFEEDER_LOG_LEVEL=DEBUG ./bgpfeeder 65534 10.0.2.2 60 100 routes peers
-}}}
+</pre>
 
 You should now be able to see the systems start up and warn that they are
 doing nothing.  Verify that "show ip bgp" shows no BGP peers.  Now add
-'''10.0.2.15:1179''' to the peers file and watch it connect.  Now try adding
+_10.0.2.15:1179_ to the peers file and watch it connect.  Now try adding
 and
 deleting routes to the routes files, or add some duff peers etc. to see the
 system work.
 
-= Testing against Cisco IOS =
+h1. Testing against Cisco IOS
+
 I have only tried with dynamips and a Cisco 7200 image, which I started with
 this command line:
 
-{{{
+<pre>
   ./dynamips image.bin -t npe-400 \
     -p 1:PA-A1 -p 2:PA-8T -p 3:PA-4E -p 4:PA-POS-OC3 -p 6:PA-FE-TX \
     -s 0:0:tap:c7200
   ip link set c7200 up
   ip addr add 10.0.0.2/24 dev c7200
   ip addr add fc00:1234::2/64 dev c7200
-}}}
+</pre>
 
 Then on the IOS command line (assuming a completely fresh router
 configuration):
-{{{
+<pre>
   enable
   configure terminal
     ip routing
@@ -346,7 +347,7 @@ configuration):
       exit
     exit
   write memory
-}}}
+</pre>
 
 You should now be able to ping 10.0.0.1 to talk to your virtual Cisco.  
 
@@ -356,7 +357,7 @@ and you can "show ip bgp" to see which routes are being received.  I also
 find that "debug ip bgp all", "debug ip bgp events" and "debug ip bgp updates" 
 are very useful to have turned on.
 
-= Copyright =
+h1. Copyright
 
 bgpfeeder is (C) Bytemark Hosting 2009-2011, and may be distributed according 
 to the terms of the GNU General Public License version 3 ONLY.

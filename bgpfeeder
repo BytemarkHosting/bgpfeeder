@@ -37,7 +37,7 @@ class IPAddr
   #
   MASK_REVERSE = {}
   [32, 128].each do |bits|
-    (0..bits).each { |b| MASK_REVERSE[(1<<bits) - (1<<b)] = bits-b }
+    (0..bits).each { |b| MASK_REVERSE[(1 << bits) - (1 << b)] = bits-b }
   end
   
   raise "Bug in MASK_REVERSE" if
@@ -275,7 +275,11 @@ module BGP
                  "Unsupported Optional Parameter",
                  "Authentication Failure",
                  "Unacceptable Hold Time",
-                 "Unsupported Capability"
+                 "Unsupported Capability",
+                 "Grouping Conflict",
+                 "Grouping Required",
+                 "Redirecting Now",
+                 "Redirect Required"
                 ],
                 [nil, #UPDATE Message Error subcodes
                  "Malformed Attribute List",
@@ -544,7 +548,9 @@ module BGP
           @s = nil
 
           if advertise_capabilities && (notification.kind_of?(Notification::OptionalAttributeError) ||
-                                        notification.kind_of?(Notification::UnsupportedCapability))
+                                        notification.kind_of?(Notification::UnsupportedCapability) ||
+                                        notification.kind_of?(Notification::GroupingConflict)
+                                        )
             l_warn("Peer doesn't do multiprotocol, trying again without")
             advertise_capabilities = false
             retry

@@ -1175,7 +1175,7 @@ module BGP
           # changes the secret.
           #
           peer_list_new = @file.read_lines.
-            select { |l| /^[\[\]\-a-f\d+\.\:]+( .*)?$/.match(l) }
+            select { |l| /^[\[\]\-a-fA-F\d+\.\:]+( .*)?$/.match(l) }
           peer_list_finished = @peer_threads.keys - peer_list_new
           peer_list_to_start = peer_list_new - @peer_threads.keys
 

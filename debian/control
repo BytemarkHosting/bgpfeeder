@@ -1,0 +1,13 @@
+Source: bgpfeeder
+Section: unknown
+Priority: extra
+Maintainer: Nicholas Thomas <nick@bytemark.co.uk>
+Build-Depends: debhelper (>= 7)
+Standards-Version: 3.8.3
+Homepage: <insert the upstream URL, if relevant>
+
+Package: bgpfeeder
+Architecture: all
+Depends: ${misc:Depends}
+Description: <insert up to 60 chars description>
+ <insert long description, indented with spaces>

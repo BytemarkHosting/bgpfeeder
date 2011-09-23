@@ -1,0 +1,5 @@
+bgpfeeder (0.1-1) unstable; urgency=low
+
+  * Initial release (Closes: #nnnn)  <nnnn is the bug number of your ITP>
+
+ -- Nicholas Thomas <nick@bytemark.co.uk>  Fri, 23 Sep 2011 11:38:44 +0100

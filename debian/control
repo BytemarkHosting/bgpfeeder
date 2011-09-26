@@ -8,6 +8,7 @@ Homepage: <insert the upstream URL, if relevant>
 
 Package: bgpfeeder
 Architecture: all
-Depends: ${misc:Depends}
-Description: <insert up to 60 chars description>
- <insert long description, indented with spaces>
+Depends: ${misc:Depends}, libdaemons-ruby1.8
+Description: Simple BGP daemon
+ Used to advertise a simple set of routes to upstream BGP servers
+

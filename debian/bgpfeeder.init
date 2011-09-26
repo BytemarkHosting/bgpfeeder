@@ -1,0 +1,63 @@
+#!/usr/bin/ruby1.8
+#
+### BEGIN INIT INFO
+# Provides:          bgpfeeder
+# Required-Start:    $network $local_fs
+# Required-Stop:
+# Should-Start:      $named
+# Should-Stop:
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: BGPFeeder
+# Description:       Advertises BGP routes
+### END INIT INFO
+
+ENV['PATH'] = "/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin"
+
+DAEMON = "/usr/bin/bgpfeeder"   # Introduce the server's location here
+NAME   = "bgpfeeder"            # Introduce the short server's name here
+DESC   = "BGPFeeder"             # Introduce a short description here
+
+PIDFILE = "/var/run/#{NAME}.pid"
+
+exit 0 unless File.exist?(DAEMON)
+
+# Include defaults if available. By a happy coincidence, Bash and Ruby have
+# similar enough conventions here for us to not care which it's written for.
+class Cfg
+  data = File.read("/etc/default/#{NAME}") rescue nil
+  eval(data) if data
+end
+
+# Construct a command-line from the options in the default file
+dopts = [ARGV, '--'].flatten
+dopts << "--as-number #{Cfg::AS_NUMBER}"   if defined?(Cfg::AS_NUMBER)
+dopts << "--bgp-identifier #{Cfg::BGP_ID}" if defined?(Cfg::BGP_ID)
+dopts << "--routes #{Cfg::ROUTES_FILE}"    if defined?(Cfg::ROUTES_FILE)
+dopts << "--peers #{Cfg::PEERS_FILE}"      if defined?(Cfg::PEERS_FILE)
+dopts << "--local-pref #{CFG::LOCAL_PREF}" if defined?(Cfg::LOCAL_PREF)
+dopts << "--hold-time #{CFG::HOLD_TIME}"   if defined?(Cfg::HOLD_TIME)
+dopts << "--log-level #{Cfg::LOG_LEVEL}"   if defined?(Cfg::LOG_LEVEL)
+dopts << "--log-file #{Cfg::LOG_FILE}"     if defined?(Cfg:::LOG_FILE)
+
+# Use this if you want the user to explicitly set 'RUN' in
+# /etc/default/
+if ARGV[0] == "start" && (!defined?(Cfg::RUN) || Cfg::RUN != "yes")
+  STDERR.puts("#{NAME} disabled, please adjust the configuration to your needs ")
+  STDERR.puts("and then set RUN to 'yes' in /etc/default/$NAME to enable it.")
+  exit 0
+end
+
+require 'daemons'
+
+Daemons::run(DAEMON,
+  :app_name => 'bigv-tail',
+  :ARGV => dopts,
+  :dir_mode => :system,
+  :multiple => false,
+  :backtrace => true,
+  :monitor => false,
+  :log_output => false,
+  :force_kill_waittime => -1
+)
+

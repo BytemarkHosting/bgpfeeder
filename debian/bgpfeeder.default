@@ -7,4 +7,31 @@
 #
 
 # Additional options that are passed to the Daemon.
-DAEMON_OPTS=""
+RUN="no"
+
+# The AS you're advertising your routes to
+AS_NUMBER="65534"
+
+# BGP ID (IP address of this daemon)
+BGP_ID="127.0.0.1"
+
+# local-pref value
+LOCAL_PREF=200
+
+# Routes to advertise. We reload these automatically
+ROUTES_FILE="/etc/bgpfeeder/routes"
+
+# Peers to advertise routes to. Again, reloaded automatically
+PEERS_FILE="/etc/bgpfeeder/peers"
+
+HOLD_TIME=60
+
+# Comma-separated list of communities
+#COMMUNITIES=""
+
+# One of "INFO", "DEBUG", etc.
+LOG_LEVEL="DEBUG"
+
+# Where to send the logging output
+LOG_FILE="/var/log/bgpfeeder.log"
+

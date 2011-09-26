@@ -38,7 +38,7 @@ dopts << "--peers #{Cfg::PEERS_FILE}"      if defined?(Cfg::PEERS_FILE)
 dopts << "--local-pref #{CFG::LOCAL_PREF}" if defined?(Cfg::LOCAL_PREF)
 dopts << "--hold-time #{CFG::HOLD_TIME}"   if defined?(Cfg::HOLD_TIME)
 dopts << "--log-level #{Cfg::LOG_LEVEL}"   if defined?(Cfg::LOG_LEVEL)
-dopts << "--log-file #{Cfg::LOG_FILE}"     if defined?(Cfg:::LOG_FILE)
+dopts << "--log-file #{Cfg::LOG_FILE}"     if defined?(Cfg::LOG_FILE)
 
 # Use this if you want the user to explicitly set 'RUN' in
 # /etc/default/

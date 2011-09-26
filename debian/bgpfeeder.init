@@ -52,12 +52,12 @@ require 'daemons'
 
 Daemons::run(DAEMON,
   :app_name => NAME,
+  :mode => :exec,
   :ARGV => dopts,
   :dir_mode => :system,
   :multiple => false,
-  :backtrace => true,
   :monitor => false,
-  :log_output => false,
+  :log_output => true,
   :force_kill_waittime => -1
 )
 

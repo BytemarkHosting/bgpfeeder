@@ -51,7 +51,7 @@ end
 require 'daemons'
 
 Daemons::run(DAEMON,
-  :app_name => 'bigv-tail',
+  :app_name => NAME,
   :ARGV => dopts,
   :dir_mode => :system,
   :multiple => false,

@@ -1,4 +1,4 @@
-#!/usr/bin/ruby
+#!/usr/bin/env ruby1.8
 # Simple BGP talker implemented from:
 # * RFC1771
 # * RFC1997

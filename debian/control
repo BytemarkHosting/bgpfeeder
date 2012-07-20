@@ -8,7 +8,7 @@ Homepage: https://projects.bytemark.co.uk/projects/bgpfeeder
 
 Package: bgpfeeder
 Architecture: all
-Depends: ${misc:Depends}, libdaemons-ruby1.8
+Depends: ${misc:Depends}, libdaemons-ruby1.8, ruby1.8
 Description: Simple BGP daemon
  Used to advertise a simple set of routes to upstream BGP servers
 

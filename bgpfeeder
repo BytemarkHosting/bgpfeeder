@@ -1,4 +1,5 @@
 #!/usr/bin/env ruby1.8
+#
 # Simple BGP talker implemented from:
 # * RFC1771
 # * RFC1997
@@ -6,12 +7,15 @@
 # * RFC3392
 # * RFC4760
 #
-# See http://src.bytemark.co.uk/trac/bgpfeeder for later versions and more
+# See https://projects.bytemark.co.uk/projects/bgpfeeder for later versions and more
 # information.
 #
-# (c) Bytemark Hosting 2009-2011
+# (c) Bytemark Hosting 2009-2012
+#
 # <matthew@bytemark.co.uk>
 #
+
+
 require 'ipaddr'
 require 'socket'
 require 'logger'

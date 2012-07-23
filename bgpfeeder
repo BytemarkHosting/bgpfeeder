@@ -423,10 +423,10 @@ module BGP
     # Help with parsing textual descriptions
     #
     _IP = '(?:\d+\.\d+\.\d+\.\d+|[A-Fa-f0-9:]+)'
-    FORMAT_LINUX = /^(#{_IP}\/\d+) (?:via )(#{_IP})/
+    FORMAT_LINUX = /^(#{_IP}\/\d+)\s+(?:via )(#{_IP})/
     FORMAT_CISCO = /^(?:ip route )?(#{_IP}) (#{_IP}) (#{_IP})/
-    FORMAT_COMMUNITIES = /\Wcommunities ([\d\:\,]+)/
-    FORMAT_LOCAL_PREF  = /\Wlocal_pref (\d+)/
+    FORMAT_COMMUNITIES = /\Wcommunities\s+([\d\:\,]+)/
+    FORMAT_LOCAL_PREF  = /\Wlocal_pref\s+(\d+)/
 
     def self.parse_line(line)
       case line

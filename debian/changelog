@@ -1,3 +1,9 @@
+bgpfeeder (0.3) unstable; urgency=low
+
+  * Updated to ensure there was never a non-native history.
+
+ -- Steve Kemp <steve@bytemark.co.uk>  Mon, 23 Jul 2012 11:00:11 +0000
+
 bgpfeeder (0.2) unstable; urgency=low
 
   * Updated many aspects of the Debian package to improve policy compliance
@@ -5,7 +11,7 @@ bgpfeeder (0.2) unstable; urgency=low
 
  -- Steve Kemp <steve@bytemark.co.uk>  Fri, 20 Jul 2012 15:00:51 +0000
 
-bgpfeeder (0.1-1) unstable; urgency=low
+bgpfeeder (0.1) unstable; urgency=low
 
   * Initial release (Closes: #nnnn)  <nnnn is the bug number of your ITP>
 

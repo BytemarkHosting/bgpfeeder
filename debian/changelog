@@ -1,3 +1,9 @@
+bgpfeeder (0.3-2) unstable; urgency=low
+
+  * Fix a bug where the command-line specified local-pref was not respected
+
+ -- Nick Thomas <nick@bytemark.co.uk>  Thu, 27 Jun 2013 10:05:16 +0100
+
 bgpfeeder (0.3) unstable; urgency=low
 
   * Updated to ensure there was never a non-native history.

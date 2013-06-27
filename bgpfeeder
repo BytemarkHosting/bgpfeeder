@@ -392,7 +392,6 @@ module BGP
   class Update < Struct.new(:prefix, :next_hop, :withdraw, :local_pref, :communities)
     def initialize(prefix, next_hop=nil)
       self.communities = []
-      self.local_pref = 100
       self.prefix = prefix
       self.next_hop = next_hop
     end
@@ -1098,7 +1097,7 @@ module BGP
       # add system defaults to each route
       # 
       new_routes.each do |route|
-        route.local_pref = local_pref if local_pref && !route.local_pref
+        route.local_pref ||= local_pref
         route.communities += communities
       end
 
@@ -1339,7 +1338,7 @@ if __FILE__ == $0
                       route_file
                       )
     db.communities = options[:communities]
-    db.local_pref = options[:local_pref]
+    db.local_pref = options[:local_pref] if options[:local_pref]
     db.hold_time = options[:hold_time]
     db
   end

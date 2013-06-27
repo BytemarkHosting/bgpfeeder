@@ -35,7 +35,7 @@ end
 class IPAddr
   # A handy lookup table so that we can quickly map netmasks to prefix
   # lengths, for example:
-  #   0xffffff00 => 24 
+  #   0xffffff00 => 24
   # or
   #   0xfffffffffffffffffffffffffffff000 => 116
   #
@@ -43,14 +43,14 @@ class IPAddr
   [32, 128].each do |bits|
     (0..bits).each { |b| MASK_REVERSE[(1 << bits) - (1 << b)] = bits-b }
   end
-  
+
   raise "Bug in MASK_REVERSE" if
     MASK_REVERSE[0xffffff00] != 24 ||
     MASK_REVERSE[0xfffffffffffffffffffffffffffff000] != 116
-  
+
   # BGP update messages contain IP prefixes encoded as <length,prefix>
   # tuples where length is 0-4 and prefix is the number of relevant
-  # bytes of the IP address, e.g. 
+  # bytes of the IP address, e.g.
   #
   #    10.0.0.0/24 => [1,10]
   #    192.168.0.1/32 => [4,192,168,0,1]
@@ -58,7 +58,7 @@ class IPAddr
   # or
   #    1111:2222::/32 => [4,17,17,34,34]
   #    ::/0 => [0]
-  # 
+  #
   def bgp_encoded_prefix
     bits = MASK_REVERSE[@mask_addr]
     max_bits = ipv4? ? 32 : 128
@@ -67,7 +67,7 @@ class IPAddr
                else
                  ""
                end
-                 
+
   end
 
   def hash
@@ -79,9 +79,9 @@ class IPAddr
     if ipv4?
       [to_i].pack("N")
     elsif ipv6?
-      [((to_i & (0xffffffff << 96))>>96)].pack("N") + 
-      [((to_i & (0xffffffff << 64))>>64)].pack("N") + 
-      [((to_i & (0xffffffff << 32))>>32)].pack("N") + 
+      [((to_i & (0xffffffff << 96))>>96)].pack("N") +
+      [((to_i & (0xffffffff << 64))>>64)].pack("N") +
+      [((to_i & (0xffffffff << 32))>>32)].pack("N") +
       [((to_i &  0xffffffff       )    )].pack("N")
     else
       raise ArgumentError.new("Unknown IP address type")
@@ -123,41 +123,41 @@ raise "Bug in IPAddr extensions" if
 #   1111111111            # IPAddr explodes
 #   bad string            # not even close
 #   1.2.3.4-5.6.7.8-9.10.11.12 # too many dashes
-# 
+#
 class IpAddrAndPort
   attr_reader :ipaddr, :port
   attr_reader :from
-  
+
   # Parse an IP address/port combination, optionally specifying a default port.
   #
   def initialize(spec, default_port=nil)
     raise ArgumentError.new("default_port must be a number") unless
      default_port.nil? || default_port.kind_of?(Fixnum)
 
-    spec1, spec2 = spec.split(/-/, 2)   
+    spec1, spec2 = spec.split(/-/, 2)
     @from=nil
 
     if spec2
       @from = IpAddrAndPort.new(spec1, nil)
       spec = spec2
     end
-   
+
     @ipaddr, @port = parse(spec)
     @port ||= default_port
 
     if @from
       raise ArgumentError.new("Only one dash allowed in IP spec (left-hand side means 'source', right-hand side means 'destination'") if @from.from
-      raise ArgumentError.new("Can't connect an IPv4 source to an IPv6 destination (or vice versa)") if 
+      raise ArgumentError.new("Can't connect an IPv4 source to an IPv6 destination (or vice versa)") if
         @from.ipaddr.ipv6? != ipaddr.ipv6?
     end
   end
-  
+
   # Returns a two-element array of [IPAddr, port]
   #
   def to_a
     [ipaddr, port]
   end
-  
+
   # Returns the IP address and port as a string.
   #
   def to_s
@@ -174,14 +174,14 @@ class IpAddrAndPort
     else
       ":#{port}"
     end
-    
+
     if from
       from.to_s + "-" +dest_s
     else
       dest_s
     end
   end
-  
+
   def parse(spec)
     spec = spec.downcase.gsub(/^\s+|\s+$/, "")
     port = nil
@@ -194,7 +194,7 @@ class IpAddrAndPort
     if spec =~ /^\[([^\]]+)\]$/
       spec = $1
     end
-    
+
     if spec.empty?
       ipaddr = nil
     else
@@ -209,29 +209,29 @@ class IpAddrAndPort
         end
       end
     end
-    
+
     [ipaddr, port]
   end
 end
 
-# A Linux-specific class to set up a RFC2385-compliant MD5-secured TCP 
+# A Linux-specific class to set up a RFC2385-compliant MD5-secured TCP
 # connection.
 #
 class TCPMD5Socket < Socket
   IPPROTO_TCP =  6 # linux/in.h
   TCP_MD5SIG  = 14 # linux/tcp.h
   TCP_MD5SIG_MAXKEYLEN = 80 # linux/tcp.h
-  
+
   # Works exactly the same as TCPSocket.open except you can supply a password
   # to pass to the kernel for MD5 authhentication.
   #
   def initialize(password, host, port, local_host=nil, local_port=nil)
 
-    raise ArgumentError.new("Password is too long") if 
+    raise ArgumentError.new("Password is too long") if
       password.length > TCP_MD5SIG_MAXKEYLEN
-      
+
     family = Socket.const_get(IPAddr.new(host).ipv4? ? "AF_INET" : "AF_INET6")
-    super(family, Socket::SOCK_STREAM, 0)      
+    super(family, Socket::SOCK_STREAM, 0)
     # struct tcp_md5sig {
     # 	struct __kernel_sockaddr_storage tcpm_addr;	/* address associated */
     # 	__u16	__tcpm_pad1;				/* zero */
@@ -241,7 +241,7 @@ class TCPMD5Socket < Socket
     # };
     tcp_md5sig_buffer = [
       Socket.pack_sockaddr_in(port, host), 0, password.length, 0, password
-    ].pack("a128SSLa#{TCP_MD5SIG_MAXKEYLEN}")    
+    ].pack("a128SSLa#{TCP_MD5SIG_MAXKEYLEN}")
     setsockopt(IPPROTO_TCP, TCP_MD5SIG, tcp_md5sig_buffer)
     bind(Socket.pack_sockaddr_in(local_port, local_host)) if local_host || local_port
     connect(Socket.pack_sockaddr_in(port, host))
@@ -264,7 +264,7 @@ module BGP
              "Finite State Machine Error",
              "Cease"
             ]
-    
+
     SUBCODES = [
                 [],
                 [nil, # Message Header Error subcodes
@@ -302,7 +302,7 @@ module BGP
 
     class General < Exception
       attr_reader :code, :subcode
-      
+
       def sent?; @sent; end
       def received?; !sent?; end
 
@@ -368,10 +368,10 @@ module BGP
     BGP::Notification::General.new(1,1,true).code == 1 &&
     BGP::Notification::General.new(1,1,true).subcode == 1 &&
     BGP::Notification::General.new(1,1,false).received? &&
-    BGP::Notification.constants.include?("UpdateMessageError") && 
-    BGP::Notification.constants.include?("InvalidOriginAttribute") && 
-    !BGP::Notification.constants.include?("Subcode") && 
-    BGP::Notification::UpdateMessageError.new(1,true).sent? && 
+    BGP::Notification.constants.include?("UpdateMessageError") &&
+    BGP::Notification.constants.include?("InvalidOriginAttribute") &&
+    !BGP::Notification.constants.include?("Subcode") &&
+    BGP::Notification::UpdateMessageError.new(1,true).sent? &&
     BGP::Notification::UpdateMessageError.new(1,false).received? &&
     BGP::Notification::UpdateMessageError.new(99).code == 3 &&
     BGP::Notification::UpdateMessageError.new(99).subcode == 99 &&
@@ -443,7 +443,7 @@ module BGP
       list = list.split(/[ ,]+/) if list.kind_of?(String)
       raise ArgumentError.new("Must pass String or Array") unless
         list.kind_of?(Array)
-      
+
       list.map do |community|
         case community
           when Integer then community
@@ -529,7 +529,7 @@ module BGP
                                       remote.from.ipaddr.to_s, remote.from.port)
                    else
                      TCPMD5Socket.new(@tcp_md5_secret, remote.ipaddr.to_s, remote.port)
-                   end                     
+                   end
                  else
                    if remote.from
                      TCPSocket.new(remote.ipaddr.to_s, remote.port,
@@ -570,8 +570,8 @@ module BGP
         # error.
         #
         rescue Timeout::Error,
-               Errno::ECONNREFUSED, 
-               Errno::ETIMEDOUT, 
+               Errno::ECONNREFUSED,
+               Errno::ETIMEDOUT,
                Errno::EHOSTDOWN,
                Errno::EHOSTUNREACH,
                Errno::ENETDOWN,
@@ -624,7 +624,7 @@ module BGP
     TYPE_NOTIFICATION = 3
     TYPE_KEEPALIVE = 4
 
-    # first communication once socket is open, send OPEN, expect to 
+    # first communication once socket is open, send OPEN, expect to
     # receive the same from peer, note its hold time.
     #
     def do_open(advertise_capabilities=false)
@@ -650,7 +650,7 @@ module BGP
       end
     end
 
-    # The only optional parameter we support is Capabilities Advertisement, we 
+    # The only optional parameter we support is Capabilities Advertisement, we
     # object to anything else.
     #
     def handle_optional_parameters(raw)
@@ -677,10 +677,10 @@ module BGP
             cap_length != cap_value.length
 
           if cap_code == 1 # Multiprotocol Extensions RFC 2858
-            send_notification(1,0,"multiprotocol capability size should be 4") unless 
+            send_notification(1,0,"multiprotocol capability size should be 4") unless
               cap_value.length == 4
             afi, _reserved, safi = cap_value.unpack("ncc")
-            
+
             if afi == 2 && safi == 1
               l_info("Peer understands IPv6/unicast")
               @peer_ipv6_capable = true
@@ -693,7 +693,7 @@ module BGP
         end
       end
     end
-    
+
     def ibgp?
       @peer_autonomous_system == @database.autonomous_system
     end
@@ -716,7 +716,7 @@ module BGP
         # all entries)
         updates = @database.updates_since(last_database_update)
         if updates.length > 0
-          send_updates(updates) 
+          send_updates(updates)
           last_database_update = Time.now
         end
 
@@ -747,13 +747,13 @@ module BGP
         end
 
         # 4: notify and terminate connection if hold timer has expired
-        send_notification(4,0,"Hold timer expired") if 
+        send_notification(4,0,"Hold timer expired") if
           Time.now - @alive_last_seen > @hold_time
       end
 
       send_notification(6,0,"User closed connection, peer will finish",false)
     end
-    
+
     def handle_notification(message)
       code, subcode, data = message[0], message[1], message[2..7]
       Notification.raise_by_code(code, subcode, false)
@@ -761,14 +761,14 @@ module BGP
 
     def send_open(advertise_capabilities=false)
       l_debug "sending OPEN for AS#{@database.autonomous_system} with hold time #{@database.hold_time} and BGP ID #{@database.bgp_identifier}"
-      
+
       open_data = [
               4, # version, BGP 4
               @database.autonomous_system,
               @database.hold_time,
               @database.bgp_identifier,
              ].pack("cnnN")
-      
+
       optional_data = ""
       if advertise_capabilities
         capability_data = [
@@ -778,9 +778,9 @@ module BGP
                            0, # reserved
                            1  # SAFI: indicate unicast
                            ].pack("ccncc")
-          
+
         optional_data = 2.chr +  # parameter type 2 (RFC3392)
-          capability_data.length.chr + 
+          capability_data.length.chr +
           capability_data
       end
 
@@ -794,7 +794,7 @@ module BGP
     ATTR_COMMUNITIES = 8
     ATTR_MP_REACH_NLRI = 14
     ATTR_MP_UNREACH_NLRI = 15
-    
+
     AS_SET = 1
     AS_SEQUENCE = 2
 
@@ -810,13 +810,13 @@ module BGP
       # would only clutter the code; as long as caller has ensured that
       # "replaced" routes are sent as one update, we avoid flaps which are
       # the main hazard.
-      # 
+      #
       l_debug "send_updates: #{updates.inspect}"
 
       updates.each do |update|
-        update_data = update.ipv6? ? update_data_multiprotocol(update) : 
+        update_data = update.ipv6? ? update_data_multiprotocol(update) :
           update_data_ipv4(update)
-      
+
         # send the complete message
         send_message(TYPE_UPDATE, update_data)
       end
@@ -824,7 +824,7 @@ module BGP
 
     def update_data_multiprotocol(update)
       update_data = ""
-      
+
       # 1: withdrawn routes, always 0 as we use the MP_ attributes instead
       #
       update_data += "\0\0"
@@ -835,12 +835,12 @@ module BGP
       path_attributes_raw = ""
 
       # 2a: withdrawn routes first
-      path_attributes_raw += attribute_raw_unreach_nlri(update.prefix) if 
+      path_attributes_raw += attribute_raw_unreach_nlri(update.prefix) if
         update.withdraw?
 
       # 2b: now supply the new feasible route
       if update.next_hop
-        path_attributes_raw += attribute_raw_origin 
+        path_attributes_raw += attribute_raw_origin
         path_attributes_raw += attribute_raw_as_sequence
 
         # only send LOCAL_PREF over interior connections
@@ -867,13 +867,13 @@ module BGP
       update_data = ""
       # 1: withdrawn routes, either 0 or 1 in this implementation
       #
-      withdrawn_raw = update.withdraw? ? 
+      withdrawn_raw = update.withdraw? ?
       update.prefix.bgp_encoded_prefix :
         ""
       update_data += [withdrawn_raw.length].pack("n") + withdrawn_raw
-      
+
       # l_debug "withdrawn data: #{withdrawn_raw.inspect}"
-      
+
       # 2: path attributes
       #
       # The only attribute that provides different information is NEXT_HOP
@@ -882,33 +882,33 @@ module BGP
       # AS_PATH is zero-length if we're talking to an interior BGP peer,
       # and set to our local AS# if we're talking to an external peer.
       #
-      if update.next_hop        
+      if update.next_hop
         # always send ORIGIN, AS_PATH and NEXT_HOP
-        path_attributes_raw = 
+        path_attributes_raw =
           attribute_raw_origin +
           attribute_raw_as_sequence +
           attribute_raw_next_hop(update.next_hop)
 
         # only send LOCAL_PREF over interior connections
-        path_attributes_raw += attribute_raw_local_pref(update.local_pref) if 
+        path_attributes_raw += attribute_raw_local_pref(update.local_pref) if
           ibgp?
-        
+
         path_attributes_raw += attribute_raw_communities(update.communities) unless
           update.communities.empty?
 
         update_data += [path_attributes_raw.length].pack("n") + path_attributes_raw
-        
+
         # l_debug "path attributes data: #{path_attributes_raw.inspect}"
-        
+
         # 3: prefixes that the above path attributes apply to, always 1
         # per update unless we're just withdrawing a previous route.
         #
         update_data += update.prefix.bgp_encoded_prefix
       else
         # zero length path attributes if we're just withdrawing
-        update_data += "\0\0" 
+        update_data += "\0\0"
       end
-      
+
       # l_debug "prefix data: #{update.prefix.bgp_encoded_prefix.inspect}"
       update_data
     end
@@ -936,11 +936,11 @@ module BGP
 
     def attribute_raw_communities(list)
       communities_raw = list.map { |c| [c].pack("N") }.join
-      [ATYPE_TRANSITIVE | ATYPE_OPTIONAL, ATTR_COMMUNITIES].pack("cc") + 
+      [ATYPE_TRANSITIVE | ATYPE_OPTIONAL, ATTR_COMMUNITIES].pack("cc") +
         communities_raw.length.chr +
         communities_raw
     end
-        
+
     def attribute_raw_reach_nlri(v6_prefix, v6_next_hop)
       reach_nlri_raw = [2,1].pack("nc") + # AFI,SAFI
         16.chr + # length in BYTES of next hop address
@@ -1022,7 +1022,7 @@ module BGP
 
   # Utility class to watch a file, let us know when it has been updated, and
   # provide a quick way to read it into memory.
-  # 
+  #
   class FileWatcher
     attr_reader :last_updated
 
@@ -1095,7 +1095,7 @@ module BGP
       new_routes = full_update_from_lines(@file.read_lines)
 
       # add system defaults to each route
-      # 
+      #
       new_routes.each do |route|
         route.local_pref ||= local_pref
         route.communities += communities
@@ -1124,7 +1124,7 @@ module BGP
         "#{routes_to_add.length} added, "+
         "#{routes_to_delete.length} deleted, "+
         "#{routes_to_change.length} changed" unless
-        routes_to_add.empty? && 
+        routes_to_add.empty? &&
         routes_to_delete.empty? &&
         routes_to_change.empty?
 
@@ -1139,11 +1139,11 @@ module BGP
       end
 
       # Add this calculated set of route updates to our log
-      #  
+      #
       # NB we must always send withdraw requests before we add new routes,
       # in case the prefix is the same but the other attributes differ.
       #
-      @route_updates << [@file.last_updated, 
+      @route_updates << [@file.last_updated,
         routes_to_delete +
         routes_to_add +
         routes_to_change
@@ -1195,7 +1195,7 @@ module BGP
             @peer_threads[peer_spec][:peer].close
           end
 
-          # Initialise new ones 
+          # Initialise new ones
           #
           peer_list_to_start.each do |peer_spec|
             Log.info "starting new peer #{peer_spec}"
@@ -1204,7 +1204,7 @@ module BGP
             @peer_threads[peer_spec][:peer] = peer
           end
 
-          Log.warn("peers file is empty, nothing to do for now") if 
+          Log.warn("peers file is empty, nothing to do for now") if
             peer_list_new.length == 0
         end
 
@@ -1237,7 +1237,7 @@ module BGP
       end
       Log.info("all peers exited, goodbye")
     end
-  end 
+  end
 end
 
 # Command line interface
@@ -1261,7 +1261,7 @@ if __FILE__ == $0
     opts.banner = "Usage: #{$0} [options...]"
     opts.separator ""
     opts.separator "Options (must specify as-number and bgp-identifier at least):"
-    
+
     opts.on("-h", "--help", "Show this message") { print opts; exit }
 
     opts.on("-a", "--as-number NUM", Integer, "Set local AS number (default 65534)") do |as_num|
@@ -1330,11 +1330,11 @@ if __FILE__ == $0
   BGP.const_set(:Log, options[:logger])
   options.delete(:logger)
   Log.info("Starting from command line with options: "+options.inspect)
-  
+
   dbs = options[:routes].map do |route_file|
     db = Database.new(
-                      options[:autonomous_system], 
-                      options[:bgp_identifier], 
+                      options[:autonomous_system],
+                      options[:bgp_identifier],
                       route_file
                       )
     db.communities = options[:communities]
@@ -1359,3 +1359,4 @@ if __FILE__ == $0
   threads = peer_managers.map { |pm| Thread.new { pm.run } }
   threads.each { |t| t.join }
 end
+

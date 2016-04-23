@@ -1,0 +1,7 @@
+bgpfeeder.debhelper.log
+bgpfeeder.postinst.debhelper
+bgpfeeder.postrm.debhelper
+bgpfeeder.prerm.debhelper
+bgpfeeder.substvars
+bgpfeeder/
+files

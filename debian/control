@@ -3,12 +3,12 @@ Section: net
 Priority: extra
 Maintainer: Steve Kemp <steve@bytemark.co.uk>
 Build-Depends: debhelper (>= 7)
-Standards-Version: 3.9.1
+Standards-Version: 3.9.6
 Homepage: https://github.com/BytemarkHosting/bgpfeeder
 
 Package: bgpfeeder
 Architecture: all
-Depends: ${misc:Depends}, libdaemons-ruby1.8, ruby1.8
+Depends: ${misc:Depends}, ruby, ruby-daemons
 Description: Simple BGP daemon
  Used to advertise a simple set of routes to upstream BGP servers
 

@@ -4,7 +4,7 @@ Priority: extra
 Maintainer: Steve Kemp <steve@bytemark.co.uk>
 Build-Depends: debhelper (>= 7)
 Standards-Version: 3.9.1
-Homepage: https://projects.bytemark.co.uk/projects/bgpfeeder
+Homepage: https://github.com/BytemarkHosting/bgpfeeder
 
 Package: bgpfeeder
 Architecture: all

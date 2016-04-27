@@ -1,4 +1,6 @@
-#!/usr/bin/env ruby1.8
+#!/usr/bin/env ruby
+# Encoding: ASCII
+# ^^^^^^^^^^^^^^^ the encoding is set to ascii so the IPAddr extention tests work :)
 #
 # Simple BGP talker implemented from:
 # * RFC1771
@@ -368,9 +370,9 @@ module BGP
     BGP::Notification::General.new(1,1,true).code == 1 &&
     BGP::Notification::General.new(1,1,true).subcode == 1 &&
     BGP::Notification::General.new(1,1,false).received? &&
-    BGP::Notification.constants.include?("UpdateMessageError") &&
-    BGP::Notification.constants.include?("InvalidOriginAttribute") &&
-    !BGP::Notification.constants.include?("Subcode") &&
+    BGP::Notification.constants.include?(:UpdateMessageError) &&
+    BGP::Notification.constants.include?(:InvalidOriginAttribute) &&
+    !BGP::Notification.constants.include?(:Subcode) &&
     BGP::Notification::UpdateMessageError.new(1,true).sent? &&
     BGP::Notification::UpdateMessageError.new(1,false).received? &&
     BGP::Notification::UpdateMessageError.new(99).code == 3 &&

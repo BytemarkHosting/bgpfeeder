@@ -21,6 +21,11 @@ package:jessie:
   variables:
     DISTRO: jessie
 
+package:stretch:
+  <<: *package
+  variables:
+    DISTRO: stretch
+
 
 publish:
   stage: publish
@@ -31,4 +36,5 @@ publish:
   dependencies:
     - package:wheezy
     - package:jessie
+    - package:stretch
 

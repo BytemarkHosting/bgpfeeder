@@ -993,6 +993,7 @@ module BGP
       begin
         Timeout::timeout(timeout_seconds) do
           header = @s.read(19)
+          header = header.force_encoding(Encoding::ASCII_8BIT) if header.respond_to?(:force_encoding)
           return nil unless header
           # l_debug { "received header: "+header.inspect }
           send_notification(1,1,"Marker not detected (or out of sync)") if header[0..15] != MARKER
@@ -1001,6 +1002,7 @@ module BGP
             @alive_last_seen = Time.now
           end
           data = @s.read(length-19)
+          data = data.force_encoding(Encoding::ASCII_8BIT) if data.respond_to?(:force_encoding)
           # l_debug { "received data: "+data.inspect }
           return [type, data]
         end

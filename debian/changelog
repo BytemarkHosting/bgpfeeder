@@ -1,3 +1,9 @@
+bgpfeeder (0.4) unstable; urgency=low
+
+  * Update to work with ruby-2.3 (#3, !3)
+
+ -- James Carter <james.carter@bytemark.co.uk>  Tue, 09 Oct 2018 15:44:07 +0100
+
 bgpfeeder (0.3-2) unstable; urgency=low
 
   * Fix a bug where the command-line specified local-pref was not respected

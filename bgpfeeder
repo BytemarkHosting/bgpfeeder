@@ -524,7 +524,7 @@ module BGP
         advertise_capabilities = true
 
         begin
-          timeout(10) do
+          Timeout::timeout(10) do
             @s = if @tcp_md5_secret
                    if remote.from
                      TCPMD5Socket.new(@tcp_md5_secret, remote.ipaddr.to_s, remote.port,
@@ -985,7 +985,7 @@ module BGP
     #
     def read_next_message(timeout_seconds=0)
       begin
-        timeout(timeout_seconds) do
+        Timeout::timeout(timeout_seconds) do
           header = @s.read(19)
           return nil unless header
           # l_debug { "received header: "+header.inspect }

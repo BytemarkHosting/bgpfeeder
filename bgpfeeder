@@ -32,6 +32,12 @@ class String
   def pop_char; careful_pop(1).unpack("C")[0]; end
   def pop_net_short; careful_pop(2).unpack("n")[0]; end
   def pop_net_int; careful_pop(4).unpack("N")[0]; end
+
+  # Ruby 1.8 returns an int for string[index] and this code assumes that.
+  # This method achieves the same thing in a way that works with all rubies
+  def byte_at(idx)
+    self[idx..idx].unpack('c').first
+  end
 end
 
 class IPAddr
@@ -524,7 +530,7 @@ module BGP
         advertise_capabilities = true
 
         begin
-          timeout(10) do
+          Timeout::timeout(10) do
             @s = if @tcp_md5_secret
                    if remote.from
                      TCPMD5Socket.new(@tcp_md5_secret, remote.ipaddr.to_s, remote.port,
@@ -637,7 +643,7 @@ module BGP
         false
       else
         send_notification(1,1,"Expected OPEN, got #{type} instead") if type != TYPE_OPEN
-        send_notification(2,1,"Unsupported BGP version, peer is speaking v#{message[0]}") if message[0] != 4
+        send_notification(2,1,"Unsupported BGP version, peer is speaking v#{message.byte_at(0)}") if message.byte_at(0) != 4
         @peer_autonomous_system = message[1..2].unpack("n")[0]
         l_info "Peer is AS#{@peer_autonomous_system}, assuming "+
           (ebgp? ? "exterior" : "interior")+
@@ -757,7 +763,7 @@ module BGP
     end
 
     def handle_notification(message)
-      code, subcode, data = message[0], message[1], message[2..7]
+      code, subcode, data = message.byte_at(0), message.byte_at(1), message[2..7]
       Notification.raise_by_code(code, subcode, false)
     end
 
@@ -985,8 +991,9 @@ module BGP
     #
     def read_next_message(timeout_seconds=0)
       begin
-        timeout(timeout_seconds) do
+        Timeout::timeout(timeout_seconds) do
           header = @s.read(19)
+          header = header.force_encoding(Encoding::ASCII_8BIT) if header.respond_to?(:force_encoding)
           return nil unless header
           # l_debug { "received header: "+header.inspect }
           send_notification(1,1,"Marker not detected (or out of sync)") if header[0..15] != MARKER
@@ -995,6 +1002,7 @@ module BGP
             @alive_last_seen = Time.now
           end
           data = @s.read(length-19)
+          data = data.force_encoding(Encoding::ASCII_8BIT) if data.respond_to?(:force_encoding)
           # l_debug { "received data: "+data.inspect }
           return [type, data]
         end

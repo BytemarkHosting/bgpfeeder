@@ -77,11 +77,12 @@ tries to connect to it and send its current complete route list.  When
 a peer is removed from the list, the BGP connection is terminated.
 Peers are IPv4 or IPv6 addresses, and can have a port specifier
 i.e. all of these are valid:
-
+```
 * 80.68.80.1
 * 127.0.0.1:1234
 * fc00:1234::1
 * [fc00:1234::1]:1234
+```
 
 The port syntax can be useful for testing (though no real BGP speaker
 will listen on a port other than the default 179).  You can also
@@ -93,11 +94,12 @@ is specified, an ordinary TCP socket will be used.
 You can also specify a source address (and port) if you want,
 e.g. here is the above list with an example source address supplied
 for each.
-
+```
 * 80.68.80.128-80.68.80.1
 * 127.0.0.1:9999-127.0.0.1:1234
 * fc00:1234::400-fc00:1234::1
 * [fc00:1234::400]:9999-[fc00:1234::1]:1234
+```
 
 The routes file contains a list of static routes with "next hop"
 specifiers.  These can either be in roughly "Linux" or "Cisco"
